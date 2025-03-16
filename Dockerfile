@@ -7,8 +7,9 @@ WORKDIR /app
 # คัดลอกไฟล์ทั้งหมดไปที่ Container
 COPY . /app
 
-# ติดตั้ง Dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# ติดตั้ง Dependencies รวมถึง uvicorn
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install uvicorn
 
 # เปิด Port ที่ต้องใช้
 EXPOSE 8000
