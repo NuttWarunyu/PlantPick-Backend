@@ -18,6 +18,7 @@ if __name__ == "__main__":
     print(os.environ)  # แสดงค่าทั้งหมดที่ Railway ใช้งาน
     
     port = os.getenv("PORT", "8000")  # อ่านค่า PORT
-    print(f"✅ Running on port: {port}")  # Debug ค่า PORT
+    print(f"✅ PORT as string: {port}")  # Debug ค่า PORT (ดูว่าเป็น string หรือเปล่า)
+    print(f"✅ PORT as int: {int(port)}")  # ลองแปลงเป็น int (ถ้าพัง แสดงว่า PORT ไม่ใช่ตัวเลขจริงๆ)
     
     uvicorn.run(app, host="0.0.0.0", port=int(port))  # แปลงเป็น int ก่อนใช้
