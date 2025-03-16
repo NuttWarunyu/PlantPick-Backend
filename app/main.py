@@ -13,6 +13,7 @@ def root():
     return {"message": "Welcome to PlantPick API"}
 
 if __name__ == "__main__":
+    print("🚀 Railway is running `main.py`!")
     print("🔍 Environment Variables in Railway:")
     print(os.environ)  # แสดงค่าทั้งหมดที่ Railway ใช้งาน
     
