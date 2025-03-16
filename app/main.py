@@ -13,5 +13,6 @@ def root():
     return {"message": "Welcome to PlantPick API"}
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8000"))  # แปลงค่า PORT ให้เป็น int
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    port = os.getenv("PORT", "8000")  # อ่านค่า PORT ถ้าไม่มีให้ใช้ 8000
+    print(f"Running on port {port}")  # Debug log
+    uvicorn.run(app, host="0.0.0.0", port=int(port))  # แปลงเป็น int ก่อนใช้
