@@ -13,7 +13,10 @@ def root():
     return {"message": "Welcome to PlantPick API"}
 
 if __name__ == "__main__":
-    # อ่านค่า PORT และแปลงให้เป็น int
-    port = int(os.getenv("PORT", "8000"))  
-    print(f"✅ Running on port {port}")  # Debug log
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    print("🔍 Environment Variables in Railway:")
+    print(os.environ)  # แสดงค่าทั้งหมดที่ Railway ใช้งาน
+    
+    port = os.getenv("PORT", "8000")  # อ่านค่า PORT
+    print(f"✅ Running on port: {port}")  # Debug ค่า PORT
+    
+    uvicorn.run(app, host="0.0.0.0", port=int(port))  # แปลงเป็น int ก่อนใช้
