@@ -2,11 +2,16 @@ import os
 import uvicorn
 from fastapi import FastAPI
 from app.routers import upload, shopee
+from app.routers import identify
+from dotenv import load_dotenv
+
+load_dotenv()  # โหลดค่าจาก .env
 
 app = FastAPI(title="PlantPick API")
 
 app.include_router(upload.router, prefix="/upload", tags=["Upload"])
 app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])
+app.include_router(identify.router, prefix="/identify", tags=["Identify"])
 
 @app.get("/")
 def root():
