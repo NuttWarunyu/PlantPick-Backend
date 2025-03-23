@@ -1,63 +1,52 @@
 import openai
 import base64
 import io
-from fastapi import APIRouter, UploadFile, File
-from PIL import Image
 import os
 from dotenv import load_dotenv
+from fastapi import APIRouter, UploadFile, File
+from PIL import Image
 
-load_dotenv()  # โหลดค่าจาก .env
-
-# โหลดค่า API Key จาก Environment
+load_dotenv()  # โหลดตัวแปรจาก .env
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not OPENAI_API_KEY:
-    raise ValueError("❌ ERROR: OPENAI_API_KEY is not set! Please check your environment variables.")
+    raise ValueError("❌ OPENAI_API_KEY ยังไม่ถูกตั้งค่า")
 
-# ตั้งค่า API Key ให้ OpenAI Client
 openai.api_key = OPENAI_API_KEY
 
-# ตั้งค่า Router
 router = APIRouter()
-
-def check_base64_size(base64_string: str):
-    """ ตรวจสอบขนาดของ Base64 Image """
-    return len(base64_string.encode('utf-8'))
 
 @router.post("/identify/")
 async def analyze_image(file: UploadFile = File(...)):
     try:
-        # อ่านไฟล์ภาพ
+        # อ่านไฟล์ + ย่อขนาด
         image_bytes = await file.read()
         image = Image.open(io.BytesIO(image_bytes))
-
-        # Resize ให้เล็กลงเพื่อประหยัด Token
         image = image.resize((300, 300))
 
-        # แปลงเป็น Base64
+        # แปลงภาพเป็น base64
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG")
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # ตรวจสอบขนาด Base64
-        base64_size = check_base64_size(base64_image)
-        if base64_size > 10000:
-            return {"error": f"Image is too large. Size: {base64_size} bytes"}
-
-        # ใช้ OpenAI วิเคราะห์รูปภาพ
+        # เรียกใช้ gpt-4o vision
         response = openai.ChatCompletion.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o",
             messages=[
-                {"role": "system", "content": "คุณเป็นผู้เชี่ยวชาญในการระบุพืชและต้นไม้จากภาพ"},
-                {"role": "user", "content": f"โปรดระบุชื่อพืชในภาพนี้: data:image/jpeg;base64,{base64_image}"}
+                {"role": "system", "content": "คุณเป็นผู้เชี่ยวชาญด้านพืช ช่วยระบุชื่อพืชและแนะนำการดูแล"},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "ภาพนี้คือต้นอะไร? ช่วยวิเคราะห์ชื่อพืช และระดับการดูแลที่เหมาะสมให้หน่อย"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]
+                }
             ],
-            max_tokens=50
+            max_tokens=500
         )
 
-        # ดึงผลลัพธ์ชื่อพืชจาก OpenAI
-        plant_name = response['choices'][0]['message']['content'].strip()
-
-        return {"plant_name": plant_name}
+        result = response['choices'][0]['message']['content'].strip()
+        return {"plant_info": result}
 
     except Exception as e:
         return {"error": str(e)}

@@ -11,7 +11,7 @@ app = FastAPI(title="PlantPick API")
 
 app.include_router(upload.router, prefix="/upload", tags=["Upload"])
 app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])
-app.include_router(identify.router, prefix="/identify", tags=["Identify"])
+app.include_router(identify.router,tags=["Identify"])
 
 @app.get("/")
 def root():
