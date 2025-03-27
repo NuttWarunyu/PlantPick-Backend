@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, UploadFile, File
 from PIL import Image
 
+# โหลดค่า API Key จาก .env
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -17,21 +18,21 @@ router = APIRouter()
 @router.post("/identify/")
 async def analyze_image(file: UploadFile = File(...)):
     try:
-        print("Starting image analysis...")
+        print("📷 เริ่มวิเคราะห์ภาพ...")
         image_bytes = await file.read()
         image = Image.open(io.BytesIO(image_bytes))
-        image = image.resize((300, 300))
+        image = image.resize((300, 300))  # ลดขนาดเพื่อประหยัด Bandwidth
 
-        print("Converting image to base64...")
+        # แปลงภาพเป็น Base64
+        print("🔄 แปลงรูปเป็น Base64...")
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG")
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        print("Creating OpenAI client...")
-        client = openai.Client(api_key=OPENAI_API_KEY)  # ✅ ใช้ Client แบบใหม่
-        print("Client created successfully")
+        # ✅ ใช้ OpenAI API Client ตามเวอร์ชันใหม่
+        print("🚀 เรียกใช้งาน OpenAI API...")
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)  # ✅ ใช้ Client API รูปแบบใหม่
 
-        print("Calling OpenAI API...")
         response = client.chat.completions.create(  # ✅ ใช้โครงสร้างใหม่
             model="gpt-4o",
             messages=[
@@ -40,17 +41,17 @@ async def analyze_image(file: UploadFile = File(...)):
                     "role": "user",
                     "content": [
                         {"type": "text", "text": "ภาพนี้คือต้นอะไร? ช่วยวิเคราะห์ชื่อพืช และระดับการดูแลที่เหมาะสมให้หน่อย"},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                        {"type": "image_url", "image_url": f"data:image/jpeg;base64,{base64_image}"}
                     ]
                 }
             ],
             max_tokens=500
         )
 
-        print("API call successful")
+        print("✅ API call successful")
         result = response.choices[0].message.content.strip()
         return {"plant_info": result}
 
     except Exception as e:
-        print(f"Error occurred: {str(e)}")
+        print(f"❌ เกิดข้อผิดพลาด: {str(e)}")
         return {"error": str(e)}
