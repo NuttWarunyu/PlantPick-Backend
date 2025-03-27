@@ -17,15 +17,21 @@ router = APIRouter()
 @router.post("/identify/")
 async def analyze_image(file: UploadFile = File(...)):
     try:
+        print("Starting image analysis...")
         image_bytes = await file.read()
         image = Image.open(io.BytesIO(image_bytes))
         image = image.resize((300, 300))
 
+        print("Converting image to base64...")
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG")
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
+        print("Creating OpenAI client...")
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        print("Client created successfully")
+
+        print("Calling OpenAI API...")
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -41,8 +47,10 @@ async def analyze_image(file: UploadFile = File(...)):
             max_tokens=500
         )
 
+        print("API call successful")
         result = response.choices[0].message.content.strip()
         return {"plant_info": result}
 
     except Exception as e:
+        print(f"Error occurred: {str(e)}")
         return {"error": str(e)}
