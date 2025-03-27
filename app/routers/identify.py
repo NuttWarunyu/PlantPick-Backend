@@ -31,7 +31,7 @@ async def analyze_image(file: UploadFile = File(...)):
 
         # เรียกใช้ gpt-4o vision
         client = openai.OpenAI()  # สร้าง client
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "คุณเป็นผู้เชี่ยวชาญด้านพืช ช่วยระบุชื่อพืชและแนะนำการดูแล"},
