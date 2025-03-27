@@ -28,8 +28,9 @@ async def analyze_image(file: UploadFile = File(...)):
         image.save(buffered, format="JPEG")
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # เรียกใช้ OpenAI API (ใช้รูปแบบใหม่)
-        response = openai.ChatCompletion.create(
+        # ใช้ OpenAI SDK ใหม่
+        client = openai.Client(api_key=OPENAI_API_KEY)  # ✅ ใช้ Client แบบใหม่
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a plant identification expert."},
@@ -44,7 +45,8 @@ async def analyze_image(file: UploadFile = File(...)):
             max_tokens=500
         )
 
-        plant_name = response["choices"][0]["message"]["content"].strip()
+        # ดึงข้อมูลจาก response
+        plant_name = response.choices[0].message.content.strip()
         return {"plant_name": plant_name}
 
     except Exception as e:

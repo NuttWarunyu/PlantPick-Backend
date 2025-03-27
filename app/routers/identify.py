@@ -6,12 +6,11 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, UploadFile, File
 from PIL import Image
 
-# โหลดค่า API Key
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not OPENAI_API_KEY:
-    raise ValueError("\u274c OPENAI_API_KEY ยังไม่ถูกตั้งค่า")
+    raise ValueError("❌ OPENAI_API_KEY ยังไม่ถูกตั้งค่า")
 
 router = APIRouter()
 
@@ -28,8 +27,12 @@ async def analyze_image(file: UploadFile = File(...)):
         image.save(buffered, format="JPEG")
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
+        print("Creating OpenAI client...")
+        client = openai.Client(api_key=OPENAI_API_KEY)  # ✅ ใช้ Client แบบใหม่
+        print("Client created successfully")
+
         print("Calling OpenAI API...")
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(  # ✅ ใช้โครงสร้างใหม่
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "คุณเป็นผู้เชี่ยวชาญด้านพืช ช่วยระบุชื่อพืชและแนะนำการดูแล"},
@@ -45,7 +48,7 @@ async def analyze_image(file: UploadFile = File(...)):
         )
 
         print("API call successful")
-        result = response["choices"][0]["message"]["content"].strip()
+        result = response.choices[0].message.content.strip()
         return {"plant_info": result}
 
     except Exception as e:
