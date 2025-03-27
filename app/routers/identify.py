@@ -12,8 +12,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise ValueError("❌ OPENAI_API_KEY ยังไม่ถูกตั้งค่า")
 
-openai.api_key = OPENAI_API_KEY
-
 router = APIRouter()
 
 @router.post("/identify/")
@@ -30,7 +28,7 @@ async def analyze_image(file: UploadFile = File(...)):
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
         # เรียกใช้ gpt-4o vision
-        client = openai.OpenAI()  # สร้าง client
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)  # ส่ง api_key ตรงนี้
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -46,7 +44,7 @@ async def analyze_image(file: UploadFile = File(...)):
             max_tokens=500
         )
 
-        result = response['choices'][0]['message']['content'].strip()
+        result = response.choices[0].message.content.strip()
         return {"plant_info": result}
 
     except Exception as e:
