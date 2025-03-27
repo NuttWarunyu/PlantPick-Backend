@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, UploadFile, File
 from PIL import Image
 
-load_dotenv()  # โหลดตัวแปรจาก .env
+load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not OPENAI_API_KEY:
@@ -17,18 +17,15 @@ router = APIRouter()
 @router.post("/identify/")
 async def analyze_image(file: UploadFile = File(...)):
     try:
-        # อ่านไฟล์ + ย่อขนาด
         image_bytes = await file.read()
         image = Image.open(io.BytesIO(image_bytes))
         image = image.resize((300, 300))
 
-        # แปลงภาพเป็น base64
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG")
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # เรียกใช้ gpt-4o vision
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)  # ส่ง api_key ตรงนี้
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
