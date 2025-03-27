@@ -4,10 +4,16 @@ import os
 import base64
 import io
 from PIL import Image
+from dotenv import load_dotenv
+
+# โหลดค่า API Key จาก .env
+load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not OPENAI_API_KEY:
+    raise ValueError("❌ OPENAI_API_KEY ยังไม่ถูกตั้งค่า")
 
 router = APIRouter()
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 @router.post("/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
@@ -22,9 +28,8 @@ async def analyze_image(file: UploadFile = File(...)):
         image.save(buffered, format="JPEG")
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # เรียกใช้ OpenAI API
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        response = client.chat.completions.create(
+        # เรียกใช้ OpenAI API (ใช้รูปแบบใหม่)
+        response = openai.ChatCompletion.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a plant identification expert."},
@@ -39,7 +44,7 @@ async def analyze_image(file: UploadFile = File(...)):
             max_tokens=500
         )
 
-        plant_name = response.choices[0].message.content.strip()
+        plant_name = response["choices"][0]["message"]["content"].strip()
         return {"plant_name": plant_name}
 
     except Exception as e:
