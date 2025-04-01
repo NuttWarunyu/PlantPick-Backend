@@ -31,22 +31,23 @@ async def analyze_image(file: UploadFile = File(...)):
 
         # ✅ ใช้ OpenAI API Client ตามเวอร์ชันใหม่
         print("🚀 เรียกใช้งาน OpenAI API...")
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)  # ✅ ใช้ Client API รูปแบบใหม่
+        client = openai.OpenAI(api_key=OPENAI_API_KEY, proxies=None)
 
-        response = client.chat.completions.create(  # ✅ ใช้โครงสร้างใหม่
-            model="gpt-4o",
-            messages=[
+
+        response = client.chat.completions.create(
+             model="gpt-4o",
+             messages=[
                 {"role": "system", "content": "คุณเป็นผู้เชี่ยวชาญด้านพืช ช่วยระบุชื่อพืชและแนะนำการดูแล"},
                 {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "ภาพนี้คือต้นอะไร? ช่วยวิเคราะห์ชื่อพืช และระดับการดูแลที่เหมาะสมให้หน่อย"},
-                        {"type": "image_url", "image_url": f"data:image/jpeg;base64,{base64_image}"}
-                    ]
-                }
-            ],
-            max_tokens=500
-        )
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "ภาพนี้คือต้นอะไร?"},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                  ]
+               }
+        ],
+        max_tokens=500
+)
 
         print("✅ API call successful")
         result = response.choices[0].message.content.strip()
