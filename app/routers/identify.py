@@ -31,7 +31,7 @@ async def analyze_image(file: UploadFile = File(...)):
 
         # ✅ ใช้ OpenAI API Client ตามเวอร์ชันใหม่
         print("🚀 เรียกใช้งาน OpenAI API...")
-        client = openai.OpenAI(api_key=OPENAI_API_KEY, proxies=None)
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 
         response = client.chat.completions.create(

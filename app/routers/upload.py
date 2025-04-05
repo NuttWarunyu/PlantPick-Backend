@@ -29,7 +29,7 @@ async def analyze_image(file: UploadFile = File(...)):
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
         # ✅ ใช้ OpenAI SDK ใหม่
-        client = openai.OpenAI(api_key=OPENAI_API_KEY, proxies=None)
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
         response = client.chat.completions.create(
             model="gpt-4o",
