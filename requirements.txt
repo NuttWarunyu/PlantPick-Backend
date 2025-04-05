@@ -5,4 +5,4 @@ python-dotenv
 python-multipart
 openai
 Pillow
-openai==1.35.3
+openai==1.68.2
