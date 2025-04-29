@@ -11,11 +11,14 @@ app = FastAPI(title="PlantPick API")
 
 from fastapi.middleware.cors import CORSMiddleware
 
+origins = [
+    "http://localhost:5173",
+    "https://plantpick-frontend.up.railway.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-    "http://localhost:5173", 
-    "https://plantpick-frontend.up.railway.app"],
+    allow_origins=origins,  # 👈🏻 ต้องส่ง list ชัดๆ
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
