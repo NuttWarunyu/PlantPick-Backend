@@ -5,8 +5,8 @@ import os
 import json
 import re
 from dotenv import load_dotenv
-from fastapi import APIRouter, UploadFile, File
-from PIL import Image
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from app.routers.search import get_popular_plants  # ปรับการ import
 
 # โหลดค่า API Key จาก .env
 load_dotenv()
@@ -146,3 +146,13 @@ async def analyze_image(file: UploadFile = File(...)):
                 {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท"}
             ]
         }
+
+@router.get("/popular-plants")
+async def popular_plants():
+    try:
+        plants = await get_popular_plants()
+        return plants
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching popular plants: {str(e)}")
