@@ -1,6 +1,4 @@
 import os
-import json
-import re
 from openai import AsyncOpenAI
 from fastapi import HTTPException
 
@@ -62,61 +60,12 @@ async def search_by_name(plant_name: str):
 
 async def get_popular_plants():
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": "ช่วยบอกชื่อต้นไม้ยอดนิยม 3 อันดับในประเทศไทย พร้อมลักษณะ ราคาเฉลี่ย และเหตุผลที่คนนิยมปลูก โดยตอบในรูปแบบ JSON ดังนี้:\n[\n  {\"name\": \"ชื่อต้นไม้\", \"description\": \"ลักษณะ\", \"price\": \"ราคา ~xxx บาท\", \"reason\": \"เหตุผลที่นิยม\"},\n  {\"name\": \"ชื่อต้นไม้\", \"description\": \"ลักษณะ\", \"price\": \"ราคา ~xxx บาท\", \"reason\": \"เหตุผลที่นิยม\"},\n  {\"name\": \"ชื่อต้นไม้\", \"description\": \"ลักษณะ\", \"price\": \"ราคา ~xxx บาท\", \"reason\": \"เหตุผลที่นิยม\"}\n]"
-                }
-            ],
-            max_tokens=300,
-        )
-        popular_plants_info = response.choices[0].message.content
-
-        # Debug: ดูข้อมูลดิบจาก OpenAI
-        print("Raw response from OpenAI:", popular_plants_info)
-
-        # ล้าง ```json และ ``` ออก
-        cleaned_response = popular_plants_info.strip()
-        if cleaned_response.startswith("```json"):
-            cleaned_response = cleaned_response[7:]  # ลบ ```json ออก
-        if cleaned_response.endswith("```"):
-            cleaned_response = cleaned_response[:-3]  # ลบ ``` ออก
-        cleaned_response = cleaned_response.strip()
-
-        # ล้างตัวอักษรพิเศษหลัง ] โดยใช้ regex
-        cleaned_response = re.sub(r'\][\s\S]*', ']', cleaned_response)
-
-        # ซ่อม JSON ที่ไม่สมบูรณ์
-        # 1. ตรวจสอบว่า string ปิดครบหรือไม่
-        if cleaned_response.count('"') % 2 != 0:  # ถ้าจำนวน " ไม่ครบคู่
-            last_quote_index = cleaned_response.rfind('"')
-            cleaned_response = cleaned_response[:last_quote_index] + '"}]'  # เพิ่ม "}] ปิดท้าย
-
-        # 2. ตรวจสอบว่า JSON ปิดครบหรือไม่
-        if not cleaned_response.endswith(']'):
-            cleaned_response = cleaned_response + ']'
-        if not cleaned_response.endswith('}'):
-            if cleaned_response.endswith(']'):
-                cleaned_response = cleaned_response[:-1] + '}]'
-            else:
-                cleaned_response = cleaned_response + '}]'
-
-        try:
-            # Parse JSON จาก OpenAI
-            plants = json.loads(cleaned_response)
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse JSON: {e}")
-            print("Using mock data as fallback")
-            plants = [
-                {"name": "เฟื่องฟ้า", "price": "~120 บาท", "description": "ไม้เลื้อย ดอกสีสดใส"},
-                {"name": "ลีลาวดี", "price": "~80 บาท", "description": "ไม้ยืนต้น ดอกหอม"},
-                {"name": "ชบา", "price": "~130 บาท", "description": "ไม้พุ่ม ดอกสีแดง"}
-            ]
-
-        # Debug: ดูว่า plants มีอะไรหลังจาก parse
-        print("Parsed plants:", plants)
+        # ใช้ mock data แทนการเรียก OpenAI
+        plants = [
+            {"name": "เฟื่องฟ้า", "price": "~120 บาท", "description": "ไม้เลื้อย ดอกสีสดใส"},
+            {"name": "ลีลาวดี", "price": "~80 บาท", "description": "ไม้ยืนต้น ดอกหอม"},
+            {"name": "ชบา", "price": "~130 บาท", "description": "ไม้พุ่ม ดอกสีแดง"}
+        ]
 
         shop_data = [
             {
