@@ -1,8 +1,11 @@
 import os
+import json
+import re
 from openai import AsyncOpenAI
-from fastapi import HTTPException
+from fastapi import HTTPException, APIRouter
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+router = APIRouter()
 
 async def identify_plant(image_data: bytes):
     try:
@@ -30,33 +33,64 @@ async def identify_plant(image_data: bytes):
 
 async def search_by_name(plant_name: str):
     try:
+        print(f"🔍 เริ่มค้นหาข้อมูลต้นไม้: {plant_name}")
         response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
                     "role": "user",
-                    "content": f"ช่วยบอกข้อมูลเกี่ยวกับต้นไม้ชื่อ '{plant_name}' รวมถึงลักษณะ วิธีดูแล ไอเดียจัดสวน และราคาเฉลี่ยในประเทศไทย"
+                    "content": f"ช่วยบอกข้อมูลเกี่ยวกับต้นไม้ชื่อ '{plant_name}' ในประเทศไทย รวมถึง:\n- ลักษณะ (description)\n- วิธีดูแล (careInstructions)\n- ไอเดียจัดสวน (gardenIdeas)\n- ราคาเฉลี่ย (price) ในหน่วยบาท\nตอบในรูปแบบข้อความสั้น ๆ และชัดเจน"
                 }
             ],
             max_tokens=300,
         )
-        plant_info = response.choices[0].message.content
+        plant_info_raw = response.choices[0].message.content
+        print(f"Raw response from OpenAI: {plant_info_raw}")
 
+        # แยกข้อมูลจากข้อความของ OpenAI
+        plant_info = {
+            "name": plant_name,
+            "description": re.search(r"ลักษณะ:(.+?)(?=วิธีดูแล|$)", plant_info_raw, re.DOTALL) or "ไม่มีข้อมูล",
+            "careInstructions": re.search(r"วิธีดูแล:(.+?)(?=ไอเดียจัดสวน|$)", plant_info_raw, re.DOTALL) or "ไม่มีข้อมูล",
+            "gardenIdeas": re.search(r"ไอเดียจัดสวน:(.+?)(?=ราคาเฉลี่ย|$)", plant_info_raw, re.DOTALL) or "ไม่มีข้อมูล",
+            "price": re.search(r"ราคาเฉลี่ย:(.+?)$", plant_info_raw) or "~ไม่มีข้อมูล",
+            "affiliateLink": "https://shopee.co.th/plant-link"
+        }
+        for key, value in plant_info.items():
+            if isinstance(value, re.Match):
+                plant_info[key] = value.group(1).strip() if value.group(1) else "ไม่มีข้อมูล"
+            else:
+                plant_info[key] = value
+
+        # เพิ่ม related plants (สมมติ)
         related_plants = [
-            {"name": "ต้นโมก", "price": "~200 บาท"},
-            {"name": "ต้นเข็ม", "price": "~80 บาท"},
+            {"name": "ยางอินเดีย", "price": "~200 บาท"},
+            {"name": "มอนสเตร่า", "price": "~500 บาท"}
         ]
 
         return {
-            "plant_info": {
-                "name": plant_name,
-                "description": plant_info,
-                "price": "ราคาเฉลี่ย: ~150 บาท (ขึ้นอยู่กับขนาดและร้านค้า)",
-            },
+            "plant_info": plant_info,
             "related_plants": related_plants
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error searching plant by name: {str(e)}")
+        print(f"❌ เกิดข้อผิดพลาดในการค้นหา: {str(e)}")
+        return {
+            "plant_info": {
+                "name": plant_name,
+                "description": "ไม่มีข้อมูล",
+                "careInstructions": "ไม่มีข้อมูล",
+                "gardenIdeas": "ไม่มีข้อมูล",
+                "price": "ไม่มีข้อมูล",
+                "affiliateLink": "https://shopee.co.th/plant-link"
+            },
+            "related_plants": [
+                {"name": "ยางอินเดีย", "price": "~200 บาท"},
+                {"name": "มอนสเตร่า", "price": "~500 บาท"}
+            ]
+        }
+
+# กำหนด route สำหรับ search_by_name
+router.get("/search-by-name/{plant_name}")(search_by_name)
 
 async def get_popular_plants():
     try:
@@ -95,3 +129,5 @@ async def get_popular_plants():
         return plants
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching popular plants: {str(e)}")
+
+router.get("/popular-plants")(get_popular_plants)
