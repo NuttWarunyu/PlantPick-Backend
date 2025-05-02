@@ -34,111 +34,55 @@ async def identify_plant(image_data: bytes):
 @router.get("/search-by-name")
 async def search_by_name(plant_name: str = Query(..., alias="name")):
     try:
-        print(f"🔍 เริ่มค้นหาข้อมูลต้นไม้: {plant_name}")
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"ตอบในรูปแบบ JSON เท่านั้น โดยไม่มีข้อความอื่นนอก JSON และแต่ละฟิลด์เป็นประโยคสั้น ๆ ไม่เกิน 10 คำ: {{\n  \"description\": \"<ลักษณะ>\",\n  \"careInstructions\": \"<วิธีดูแล>\",\n  \"gardenIdeas\": \"<ไอเดียจัดสวน>\",\n  \"price\": \"<ราคาเฉลี่ย>\"\n}}"
-                }
-            ],
-            max_tokens=150,  # ลด max_tokens เพื่อให้สั้น
-        )
-        plant_info_raw = response.choices[0].message.content
-        print(f"Raw response from OpenAI: {plant_info_raw}")
-
-        # ทำความสะอาดข้อมูลก่อน parse
-        cleaned_response = plant_info_raw.strip()
-        if cleaned_response.startswith("```json"):
-            cleaned_response = cleaned_response[7:]  # ตัด ```json ออก
-        if cleaned_response.endswith("```"):
-            cleaned_response = cleaned_response[:-3]  # ตัด ``` ออก
-        cleaned_response = cleaned_response.strip()
-
-        # ตัดข้อความนอก JSON ให้เหลือเฉพาะ JSON
-        json_start = cleaned_response.find("{")
-        json_end = cleaned_response.rfind("}") + 1
-        if json_start != -1 and json_end != -1:
-            cleaned_response = cleaned_response[json_start:json_end]
-        else:
-            raise ValueError("No valid JSON found in response")
-
-        # Parse JSON
-        try:
-            plant_info = json.loads(cleaned_response)
-            plant_info["name"] = plant_name
-            plant_info["affiliateLink"] = "https://shopee.co.th/plant-link"
-        except json.JSONDecodeError as e:
-            print(f"❌ ไม่สามารถ parse JSON ได้: {e}")
-            plant_info = {
-                "name": plant_name,
-                "description": "ไม้ใบประดับใบใหญ่ทนแสงน้อย",
-                "careInstructions": "รดน้ำสัปดาห์ละครั้ง หลีกเลี่ยงแสงแดด",
-                "gardenIdeas": "เหมาะสำหรับตกแต่งในร่ม",
-                "price": "~500-2000 บาท",
-                "affiliateLink": "https://shopee.co.th/plant-link"
-            }
-
-        related_plants = [
-            {"name": "ยางอินเดีย", "price": "~200 บาท"},
-            {"name": "มอนสเตร่า", "price": "~500 บาท"}
+        print(f"🔍 เริ่มค้นหาดีลต้นไม้: {plant_name}")
+        # Mock data สำหรับดีล (ในอนาคตให้ดึงจาก database หรือ API)
+        deals = [
+            {"plant_name": plant_name, "shop_name": "ร้านต้นไม้ถูกใจ", "price": 600, "rating": 4.8, "link": "https://shopee.co.th/deal1"},
+            {"plant_name": plant_name, "shop_name": "สวนสวย", "price": 750, "rating": 4.5, "link": "https://shopee.co.th/deal2"},
+            {"plant_name": plant_name, "shop_name": "ร้านใบไม้", "price": 650, "rating": 4.7, "link": "https://shopee.co.th/deal3"}
         ]
 
+        # หาดีลที่ดีที่สุด (ราคาถูกสุด และ rating สูง)
+        best_deal = min(deals, key=lambda x: (x["price"], -x["rating"])) if deals else None
+
+        if not best_deal:
+            raise HTTPException(status_code=404, detail="No deals found")
+
         return {
-            "plant_info": plant_info,
-            "related_plants": related_plants
+            "best_deal": {
+                "plant_name": plant_name,
+                "shop_name": best_deal["shop_name"],
+                "price": best_deal["price"],
+                "rating": best_deal["rating"],
+                "link": best_deal["link"]
+            },
+            "related_deals": deals
         }
     except Exception as e:
         print(f"❌ เกิดข้อผิดพลาดในการค้นหา: {str(e)}")
         return {
-            "plant_info": {
-                "name": plant_name,
-                "description": "ไม้ประดับขนาดกลางถึงใหญ่ ใบใหญ่หนาและมันวาว",
-                "careInstructions": "รดน้ำสัปดาห์ละ 1-2 ครั้ง ชอบแสงแดดปานกลาง",
-                "gardenIdeas": "เหมาะสำหรับจัดสวนในบ้านหรือสำนักงาน",
-                "price": "~300-1000 บาท",
-                "affiliateLink": "https://shopee.co.th/plant-link"
+            "best_deal": {
+                "plant_name": plant_name,
+                "shop_name": "ร้านต้นไม้ถูกใจ",
+                "price": 600,
+                "rating": 4.8,
+                "link": "https://shopee.co.th/deal1"
             },
-            "related_plants": [
-                {"name": "ยางอินเดีย", "price": "~200 บาท"},
-                {"name": "มอนสเตร่า", "price": "~500 บาท"}
+            "related_deals": [
+                {"plant_name": plant_name, "shop_name": "ร้านต้นไม้ถูกใจ", "price": 600, "rating": 4.8, "link": "https://shopee.co.th/deal1"},
+                {"plant_name": plant_name, "shop_name": "สวนสวย", "price": 750, "rating": 4.5, "link": "https://shopee.co.th/deal2"}
             ]
         }
 
 async def get_popular_plants():
     try:
         plants = [
-            {"name": "เฟื่องฟ้า", "price": "~120 บาท", "description": "ไม้เลื้อย ดอกสีสดใส"},
-            {"name": "ลีลาวดี", "price": "~80 บาท", "description": "ไม้ยืนต้น ดอกหอม"},
-            {"name": "ชบา", "price": "~130 บาท", "description": "ไม้พุ่ม ดอกสีแดง"}
+            {"name": "เฟื่องฟ้า", "shop_name": "ร้านต้นไม้ถูกใจ", "price": 120, "rating": 4.6, "link": "https://shopee.co.th/deal1"},
+            {"name": "ลีลาวดี", "shop_name": "สวนลีลาวดี", "price": 80, "rating": 4.7, "link": "https://shopee.co.th/deal2"},
+            {"name": "ชบา", "shop_name": "ร้านดอกชบา", "price": 130, "rating": 4.5, "link": "https://shopee.co.th/deal3"}
         ]
-
-        shop_data = [
-            {
-                "shopName": "ร้านต้นไม้ถูกใจ",
-                "price": "~120 บาท",
-                "shippingTime": "จัดส่งภายใน 1-2 วัน",
-                "link": "https://shopee.co.th/search?keyword=เฟื่องฟ้า"
-            },
-            {
-                "shopName": "สวนลีลาวดี",
-                "price": "~80 บาท",
-                "shippingTime": "จัดส่งภายใน 1 วัน",
-                "link": "https://shopee.co.th/search?keyword=ลีลาวดี"
-            },
-            {
-                "shopName": "ร้านดอกชบา",
-                "price": "~130 บาท",
-                "shippingTime": "จัดส่งภายใน 1-2 วัน",
-                "link": "https://shopee.co.th/search?keyword=ชบา"
-            }
-        ]
-
-        for i, plant in enumerate(plants):
-            if i < len(shop_data):
-                plant.update(shop_data[i])
-
         return plants
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching popular plants: {str(e)}")
+
+router.get("/popular-plants")(get_popular_plants)
