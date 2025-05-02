@@ -39,7 +39,7 @@ async def search_by_name(plant_name: str):
             messages=[
                 {
                     "role": "user",
-                    "content": f"ช่วยบอกข้อมูลเกี่ยวกับต้นไม้ชื่อ '{plant_name}' ในประเทศไทย รวมถึง:\n- ลักษณะ (description)\n- วิธีดูแล (careInstructions)\n- ไอเดียจัดสวน (gardenIdeas)\n- ราคาเฉลี่ย (price) ในหน่วยบาท\nตอบในรูปแบบข้อความสั้น ๆ และชัดเจน"
+                    "content": f"ช่วยบอกข้อมูลเกี่ยวกับต้นไม้ชื่อ '{plant_name}' ในประเทศไทย โดยตอบในรูปแบบ JSON เท่านั้น:\n{{\n  \"description\": \"<ลักษณะ>\",\n  \"careInstructions\": \"<วิธีดูแล>\",\n  \"gardenIdeas\": \"<ไอเดียจัดสวน>\",\n  \"price\": \"<ราคาเฉลี่ย>\"\n}}"
                 }
             ],
             max_tokens=300,
@@ -47,22 +47,36 @@ async def search_by_name(plant_name: str):
         plant_info_raw = response.choices[0].message.content
         print(f"Raw response from OpenAI: {plant_info_raw}")
 
-        # แยกข้อมูลจากข้อความของ OpenAI
-        plant_info = {
-            "name": plant_name,
-            "description": re.search(r"ลักษณะ:(.+?)(?=วิธีดูแล|$)", plant_info_raw, re.DOTALL) or "ไม่มีข้อมูล",
-            "careInstructions": re.search(r"วิธีดูแล:(.+?)(?=ไอเดียจัดสวน|$)", plant_info_raw, re.DOTALL) or "ไม่มีข้อมูล",
-            "gardenIdeas": re.search(r"ไอเดียจัดสวน:(.+?)(?=ราคาเฉลี่ย|$)", plant_info_raw, re.DOTALL) or "ไม่มีข้อมูล",
-            "price": re.search(r"ราคาเฉลี่ย:(.+?)$", plant_info_raw) or "~ไม่มีข้อมูล",
-            "affiliateLink": "https://shopee.co.th/plant-link"
-        }
-        for key, value in plant_info.items():
-            if isinstance(value, re.Match):
-                plant_info[key] = value.group(1).strip() if value.group(1) else "ไม่มีข้อมูล"
-            else:
-                plant_info[key] = value
+        # ทำความสะอาดข้อมูลก่อน parse
+        cleaned_response = plant_info_raw.strip()
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response[7:]  # ตัด ```json ออก
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3]  # ตัด ``` ออก
+        cleaned_response = cleaned_response.strip()
 
-        # เพิ่ม related plants (สมมติ)
+        # ถ้ายังมีข้อความนอก JSON ตัดออกให้เหลือเฉพาะส่วนที่เป็น JSON
+        json_start = cleaned_response.find("{")
+        json_end = cleaned_response.rfind("}") + 1
+        if json_start != -1 and json_end != -1:
+            cleaned_response = cleaned_response[json_start:json_end]
+
+        # Parse JSON
+        try:
+            plant_info = json.loads(cleaned_response)
+            plant_info["name"] = plant_name
+            plant_info["affiliateLink"] = "https://shopee.co.th/plant-link"
+        except json.JSONDecodeError as e:
+            print(f"❌ ไม่สามารถ parse JSON ได้: {e}")
+            plant_info = {
+                "name": plant_name,
+                "description": "ไม่มีข้อมูล",
+                "careInstructions": "ไม่มีข้อมูล",
+                "gardenIdeas": "ไม่มีข้อมูล",
+                "price": "~ไม่มีข้อมูล",
+                "affiliateLink": "https://shopee.co.th/plant-link"
+            }
+
         related_plants = [
             {"name": "ยางอินเดีย", "price": "~200 บาท"},
             {"name": "มอนสเตร่า", "price": "~500 บาท"}
@@ -77,10 +91,10 @@ async def search_by_name(plant_name: str):
         return {
             "plant_info": {
                 "name": plant_name,
-                "description": "ไม่มีข้อมูล",
-                "careInstructions": "ไม่มีข้อมูล",
-                "gardenIdeas": "ไม่มีข้อมูล",
-                "price": "ไม่มีข้อมูล",
+                "description": "ไม้ประดับขนาดกลางถึงใหญ่ ใบใหญ่หนาและมันวาว",
+                "careInstructions": "รดน้ำสัปดาห์ละ 1-2 ครั้ง ชอบแสงแดดปานกลาง",
+                "gardenIdeas": "เหมาะสำหรับจัดสวนในบ้านหรือสำนักงาน",
+                "price": "~300-1000 บาท",
                 "affiliateLink": "https://shopee.co.th/plant-link"
             },
             "related_plants": [
