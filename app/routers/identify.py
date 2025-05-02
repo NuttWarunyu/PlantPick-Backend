@@ -6,7 +6,8 @@ import json
 import re
 from dotenv import load_dotenv
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from app.routers.search import get_popular_plants  # ปรับการ import
+from app.routers.search import get_popular_plants
+from PIL import Image
 
 # โหลดค่า API Key จาก .env
 load_dotenv()
@@ -22,14 +23,18 @@ async def analyze_image(file: UploadFile = File(...)):
     try:
         print("📷 เริ่มวิเคราะห์ภาพ...")
         image_bytes = await file.read()
+        print(f"🔍 ขนาดภาพ (bytes): {len(image_bytes)}")
         image = Image.open(io.BytesIO(image_bytes))
+        print("🖼️ เปิดภาพสำเร็จ")
         image = image.resize((300, 300))  # ลดขนาดเพื่อประหยัด Bandwidth
+        print(f"🖼️ ขนาดภาพหลัง resize: {image.size}")
 
         # แปลงภาพเป็น Base64
         print("🔄 แปลงรูปเป็น Base64...")
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG")
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        print(f"🔍 ขนาด Base64: {len(base64_image)}")
 
         # ✅ ใช้ OpenAI API Client ตามเวอร์ชันใหม่
         print("🚀 เรียกใช้งาน OpenAI API...")
@@ -90,8 +95,9 @@ async def analyze_image(file: UploadFile = File(...)):
         # Parse คำตอบจาก OpenAI
         try:
             plant_info = json.loads(result)
-        except json.JSONDecodeError:
-            print("❌ ไม่สามารถ parse JSON ได้")
+            print("✅ JSON parsed successfully")
+        except json.JSONDecodeError as e:
+            print(f"❌ ไม่สามารถ parse JSON ได้: {e}")
             # ถ้าไม่ใช่ JSON ให้พยายามแปลง string เป็น JSON object
             if "ไม่สามารถระบุ" in result or result.strip() == "":
                 plant_info = {
@@ -101,6 +107,7 @@ async def analyze_image(file: UploadFile = File(...)):
                     "careInstructions": "ไม่มีข้อมูล",
                     "gardenIdeas": "ไม่มีข้อมูล"
                 }
+                print("🔧 Fallback to default plant info")
             else:
                 # พยายามดึงข้อมูลจาก string
                 name_match = re.search(r"นี่คือต้น(.+?)(?:[.,\s]|$)", result) or re.search(r"(.+?)เป็นไม้", result)
@@ -115,15 +122,18 @@ async def analyze_image(file: UploadFile = File(...)):
                     "careInstructions": care_instructions_match.group(0).replace("### การดูแลต้น", "").strip() if care_instructions_match else "ไม่มีข้อมูล",
                     "gardenIdeas": garden_ideas_match.group(1).strip() if garden_ideas_match else "ไม่มีข้อมูล"
                 }
+                print("🔧 Parsed from string:", plant_info)
 
         # เพิ่ม affiliateLink (สมมติ)
         plant_info["affiliateLink"] = "https://shopee.co.th/plant-link"
+        print("🔗 Affiliate link added")
 
         # เพิ่ม related_plants (สมมติ)
         related_plants = [
             {"name": "ชบา (Hibiscus)", "price": "~150 บาท"},
             {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท"}
         ]
+        print("🌱 Related plants added")
 
         return {
             "plant_info": plant_info,
