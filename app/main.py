@@ -9,6 +9,9 @@ load_dotenv()
 app = FastAPI(title="PlantPick API")
 
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 origins = [
     "http://localhost:5173",

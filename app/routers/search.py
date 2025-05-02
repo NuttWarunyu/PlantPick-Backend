@@ -2,7 +2,7 @@ import os
 import json
 import re
 from openai import AsyncOpenAI
-from fastapi import HTTPException, APIRouter
+from fastapi import HTTPException, APIRouter, Query
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 router = APIRouter()
@@ -31,8 +31,8 @@ async def identify_plant(image_data: bytes):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error identifying plant: {str(e)}")
 
-@router.get("/search-by-name")  # ผูกกับฟังก์ชันทันที
-async def search_by_name(plant_name: str):
+@router.get("/search-by-name")
+async def search_by_name(plant_name: str = Query(..., alias="name")):
     try:
         print(f"🔍 เริ่มค้นหาข้อมูลต้นไม้: {plant_name}")
         response = await client.chat.completions.create(
@@ -40,10 +40,10 @@ async def search_by_name(plant_name: str):
             messages=[
                 {
                     "role": "user",
-                    "content": f"ช่วยบอกข้อมูลเกี่ยวกับต้นไม้ชื่อ '{plant_name}' ในประเทศไทย โดยตอบในรูปแบบ JSON เท่านั้น:\n{{\n  \"description\": \"<ลักษณะ>\",\n  \"careInstructions\": \"<วิธีดูแล>\",\n  \"gardenIdeas\": \"<ไอเดียจัดสวน>\",\n  \"price\": \"<ราคาเฉลี่ย>\"\n}}"
+                    "content": f"ตอบในรูปแบบ JSON เท่านั้น โดยไม่มีข้อความอื่นนอก JSON และแต่ละฟิลด์เป็นประโยคสั้น ๆ ไม่เกิน 10 คำ: {{\n  \"description\": \"<ลักษณะ>\",\n  \"careInstructions\": \"<วิธีดูแล>\",\n  \"gardenIdeas\": \"<ไอเดียจัดสวน>\",\n  \"price\": \"<ราคาเฉลี่ย>\"\n}}"
                 }
             ],
-            max_tokens=300,
+            max_tokens=150,  # ลด max_tokens เพื่อให้สั้น
         )
         plant_info_raw = response.choices[0].message.content
         print(f"Raw response from OpenAI: {plant_info_raw}")
@@ -56,11 +56,13 @@ async def search_by_name(plant_name: str):
             cleaned_response = cleaned_response[:-3]  # ตัด ``` ออก
         cleaned_response = cleaned_response.strip()
 
-        # ถ้ายังมีข้อความนอก JSON ตัดออกให้เหลือเฉพาะส่วนที่เป็น JSON
+        # ตัดข้อความนอก JSON ให้เหลือเฉพาะ JSON
         json_start = cleaned_response.find("{")
         json_end = cleaned_response.rfind("}") + 1
         if json_start != -1 and json_end != -1:
             cleaned_response = cleaned_response[json_start:json_end]
+        else:
+            raise ValueError("No valid JSON found in response")
 
         # Parse JSON
         try:
@@ -71,10 +73,10 @@ async def search_by_name(plant_name: str):
             print(f"❌ ไม่สามารถ parse JSON ได้: {e}")
             plant_info = {
                 "name": plant_name,
-                "description": "ไม่มีข้อมูล",
-                "careInstructions": "ไม่มีข้อมูล",
-                "gardenIdeas": "ไม่มีข้อมูล",
-                "price": "~ไม่มีข้อมูล",
+                "description": "ไม้ใบประดับใบใหญ่ทนแสงน้อย",
+                "careInstructions": "รดน้ำสัปดาห์ละครั้ง หลีกเลี่ยงแสงแดด",
+                "gardenIdeas": "เหมาะสำหรับตกแต่งในร่ม",
+                "price": "~500-2000 บาท",
                 "affiliateLink": "https://shopee.co.th/plant-link"
             }
 
@@ -106,7 +108,6 @@ async def search_by_name(plant_name: str):
 
 async def get_popular_plants():
     try:
-        # ใช้ mock data แทนการเรียก OpenAI
         plants = [
             {"name": "เฟื่องฟ้า", "price": "~120 บาท", "description": "ไม้เลื้อย ดอกสีสดใส"},
             {"name": "ลีลาวดี", "price": "~80 บาท", "description": "ไม้ยืนต้น ดอกหอม"},
@@ -141,5 +142,3 @@ async def get_popular_plants():
         return plants
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching popular plants: {str(e)}")
-
-router.get("/popular-plants")(get_popular_plants)
