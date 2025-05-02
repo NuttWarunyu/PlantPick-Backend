@@ -31,6 +31,7 @@ async def identify_plant(image_data: bytes):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error identifying plant: {str(e)}")
 
+@router.get("/search-by-name")  # ผูกกับฟังก์ชันทันที
 async def search_by_name(plant_name: str):
     try:
         print(f"🔍 เริ่มค้นหาข้อมูลต้นไม้: {plant_name}")
@@ -102,9 +103,6 @@ async def search_by_name(plant_name: str):
                 {"name": "มอนสเตร่า", "price": "~500 บาท"}
             ]
         }
-
-# กำหนด route สำหรับ search_by_name
-router.get("/search-by-name/{plant_name}")(search_by_name)
 
 async def get_popular_plants():
     try:
