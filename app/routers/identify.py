@@ -5,7 +5,7 @@ import os
 import json
 import re
 from dotenv import load_dotenv
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 from app.routers.search import get_popular_plants
 from PIL import Image
 
@@ -19,30 +19,13 @@ if not OPENAI_API_KEY:
 router = APIRouter()
 
 @router.post("/identify/")
-async def analyze_image(file: UploadFile = File(...)):
+async def analyze_image(file: UploadFile = File(None), name: str = Form(None)):
     try:
-        print("📷 เริ่มวิเคราะห์ภาพ...")
-        image_bytes = await file.read()
-        print(f"🔍 ขนาดภาพ (bytes): {len(image_bytes)}")
-        image = Image.open(io.BytesIO(image_bytes))
-        print("🖼️ เปิดภาพสำเร็จ")
-        image = image.resize((300, 300))  # ลดขนาดเพื่อประหยัด Bandwidth
-        print(f"🖼️ ขนาดภาพหลัง resize: {image.size}")
-
-        # แปลงภาพเป็น Base64
-        print("🔄 แปลงรูปเป็น Base64...")
-        buffered = io.BytesIO()
-        image.save(buffered, format="JPEG")
-        base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        print(f"🔍 ขนาด Base64: {len(base64_image)}")
-
-        # ✅ ใช้ OpenAI API Client ตามเวอร์ชันใหม่
-        print("🚀 เรียกใช้งาน OpenAI API...")
+        print("📷 เริ่มวิเคราะห์...")
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-        # ปรับ prompt ให้ OpenAI ตอบกลับในรูปแบบ JSON เท่านั้น
+        messages = []
         prompt = """
-        คุณเป็นผู้เชี่ยวชาญด้านพืช ช่วยระบุต้นไม้ในภาพนี้และให้ข้อมูลตามฟิลด์ต่อไปนี้ในรูปแบบ JSON เท่านั้น (ห้ามใส่ข้อความอื่นนอกเหนือจาก JSON และต้องมีเครื่องหมาย {} เสมอ):
+        คุณเป็นผู้เชี่ยวชาญด้านพืช ช่วยระบุต้นไม้และให้ข้อมูลตามฟิลด์ต่อไปนี้ในรูปแบบ JSON เท่านั้น (ห้ามใส่ข้อความอื่นนอกเหนือจาก JSON และต้องมีเครื่องหมาย {} เสมอ):
 
         {
           "name": "ชื่อต้นไม้ (ชื่อวิทยาศาสตร์) และลักษณะเด่น เช่น ดอกสีขาว (ถ้าระบุไม่ได้ให้ใส่ 'ไม่สามารถระบุได้')",
@@ -61,21 +44,26 @@ async def analyze_image(file: UploadFile = File(...)):
           "gardenIdeas": "เหมาะกับสวนสไตล์เมดิเตอร์เรเนียน หรือจัดเป็นไม้พุ่มแนวรั้ว"
         }
 
-        ถ้าระบุต้นไม้ไม่ได้ ให้ตอบกลับ:
-        {
-          "name": "ไม่สามารถระบุได้",
-          "price": "ไม่มีข้อมูล",
-          "description": "ไม่มีข้อมูล",
-          "careInstructions": "ไม่มีข้อมูล",
-          "gardenIdeas": "ไม่มีข้อมูล"
-        }
-
         ห้ามตอบเป็นข้อความทั่วไปเด็ดขาด ต้องเป็น JSON เท่านั้น
         """
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
+        if file:
+            print("📷 วิเคราะห์ภาพ...")
+            image_bytes = await file.read()
+            print(f"🔍 ขนาดภาพ (bytes): {len(image_bytes)}")
+            image = Image.open(io.BytesIO(image_bytes))
+            print("🖼️ เปิดภาพสำเร็จ")
+            image = image.resize((300, 300))  # ลดขนาดเพื่อประหยัด Bandwidth
+            print(f"🖼️ ขนาดภาพหลัง resize: {image.size}")
+
+            # แปลงภาพเป็น Base64
+            print("🔄 แปลงรูปเป็น Base64...")
+            buffered = io.BytesIO()
+            image.save(buffered, format="JPEG")
+            base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            print(f"🔍 ขนาด Base64: {len(base64_image)}")
+
+            messages = [
                 {"role": "system", "content": prompt},
                 {
                     "role": "user",
@@ -84,7 +72,20 @@ async def analyze_image(file: UploadFile = File(...)):
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                     ]
                 }
-            ],
+            ]
+        elif name:
+            print(f"📝 วิเคราะห์ชื่อ: {name}")
+            messages = [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"บอกข้อมูลเกี่ยวกับต้นไม้ {name}"}
+            ]
+        else:
+            raise HTTPException(status_code=400, detail="ต้องส่งรูปหรือชื่อต้นไม้")
+
+        print("🚀 เรียกใช้งาน OpenAI API...")
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
             max_tokens=500
         )
 
@@ -98,31 +99,14 @@ async def analyze_image(file: UploadFile = File(...)):
             print("✅ JSON parsed successfully")
         except json.JSONDecodeError as e:
             print(f"❌ ไม่สามารถ parse JSON ได้: {e}")
-            # ถ้าไม่ใช่ JSON ให้พยายามแปลง string เป็น JSON object
-            if "ไม่สามารถระบุ" in result or result.strip() == "":
-                plant_info = {
-                    "name": "ไม่สามารถระบุได้",
-                    "price": "ไม่มีข้อมูล",
-                    "description": "ไม่มีข้อมูล",
-                    "careInstructions": "ไม่มีข้อมูล",
-                    "gardenIdeas": "ไม่มีข้อมูล"
-                }
-                print("🔧 Fallback to default plant info")
-            else:
-                # พยายามดึงข้อมูลจาก string
-                name_match = re.search(r"นี่คือต้น(.+?)(?:[.,\s]|$)", result) or re.search(r"(.+?)เป็นไม้", result)
-                description_match = re.search(r"เป็นไม้.+?(?=###|$)", result)
-                care_instructions_match = re.search(r"### การดูแลต้น.+?แสงแดด.+?(?=เหมาะสำหรับ|$)", result, re.DOTALL)
-                garden_ideas_match = re.search(r"เหมาะสำหรับ(.+?)(?:ค่ะ|$)", result)
-
-                plant_info = {
-                    "name": name_match.group(1).strip() if name_match else "ไม่สามารถระบุได้",
-                    "price": "ไม่มีข้อมูล",  # OpenAI ไม่ได้ให้ราคา
-                    "description": description_match.group(0).strip() if description_match else "ไม่มีข้อมูล",
-                    "careInstructions": care_instructions_match.group(0).replace("### การดูแลต้น", "").strip() if care_instructions_match else "ไม่มีข้อมูล",
-                    "gardenIdeas": garden_ideas_match.group(1).strip() if garden_ideas_match else "ไม่มีข้อมูล"
-                }
-                print("🔧 Parsed from string:", plant_info)
+            plant_info = {
+                "name": "ไม่สามารถระบุได้",
+                "price": "ไม่มีข้อมูล",
+                "description": "ไม่มีข้อมูล",
+                "careInstructions": "ไม่มีข้อมูล",
+                "gardenIdeas": "ไม่มีข้อมูล"
+            }
+            print("🔧 Fallback to default plant info")
 
         # เพิ่ม affiliateLink (สมมติ)
         plant_info["affiliateLink"] = "https://shopee.co.th/plant-link"
