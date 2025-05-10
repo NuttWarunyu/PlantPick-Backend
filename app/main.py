@@ -1,7 +1,7 @@
 import os
 import uvicorn
 from fastapi import FastAPI
-from app.routers import upload, shopee, identify, search  # เพิ่ม search
+from app.routers import upload, shopee, identify, search
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -29,11 +29,18 @@ app.add_middleware(
 app.include_router(upload.router, prefix="/upload", tags=["Upload"])
 app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])
 app.include_router(identify.router, tags=["Identify"])
-app.include_router(search.router, tags=["Search"])  # เพิ่มการ include search router
+app.include_router(search.router, tags=["Search"])
 
 @app.get("/")
 def root():
     return {"message": "Welcome to PlantPick API"}
+
+@app.get("/marketplace")
+async def get_marketplace():
+    return [
+        {"name": "สนฉัตร", "price": "~200 บาท"},
+        {"name": "เฟื่องฟ้า", "price": "~150 บาท"}
+    ]
 
 if __name__ == "__main__":
     print("🚀 Railway is running `main.py`!")
