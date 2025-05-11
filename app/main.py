@@ -8,6 +8,7 @@ load_dotenv()
 
 app = FastAPI(title="PlantPick API")
 
+# Middleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
@@ -26,11 +27,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include Routers
 app.include_router(upload.router, prefix="/upload", tags=["Upload"])
-app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])
+app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])  # Prefix ยังคงเป็น /shopee
 app.include_router(identify.router, tags=["Identify"])
 app.include_router(search.router, tags=["Search"])
 
+# Test Endpoints
 @app.get("/")
 def root():
     return {"message": "Welcome to PlantPick API"}
@@ -44,11 +47,6 @@ async def get_marketplace():
 
 if __name__ == "__main__":
     print("🚀 Railway is running `main.py`!")
-    print("🔍 Environment Variables in Railway:")
-    print(os.environ)
-    
     port = os.getenv("PORT", "8000")
-    print(f"✅ PORT as string: {port}")
-    print(f"✅ PORT as int: {int(port)}")
-    
+    print(f"✅ Running on port: {port}")
     uvicorn.run(app, host="0.0.0.0", port=int(port))
