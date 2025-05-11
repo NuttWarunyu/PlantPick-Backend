@@ -178,15 +178,29 @@ async def analyze_image(file: UploadFile = File(None), name: str = Form(None)):
 
         # ดึงข้อมูลจาก Shopee API โดยใช้ชื่อที่ OpenAI ระบุ
         identified_name = plant_info.get("name", "")
+        affiliate_offers = []
         if identified_name and identified_name != "ไม่สามารถระบุได้":
             # ใช้เฉพาะชื่อต้นไม้ (ตัดส่วนลักษณะเด่นออก เช่น "ดอกสีฟ้า")
             search_name = re.split(r'\s*\(', identified_name)[0].strip()  # เช่น "พยับหมอก"
             print(f"🔍 เรียก Shopee API ด้วยชื่อ: {search_name}")
             shopee_products = await get_shopee_products(search_name)
             if shopee_products:
+                # เลือกสินค้าที่ถูกที่สุดสำหรับ plant_info
                 cheapest_product = min(shopee_products, key=lambda x: float(x["price"]))
                 plant_info["price"] = f"{cheapest_product['price']} บาท"
                 plant_info["affiliateLink"] = cheapest_product["offerLink"]
+
+                # เตรียม affiliate_offers (เลือก 3-5 รายการ)
+                affiliate_offers = [
+                    {
+                        "price": f"{product['price']} บาท",
+                        "offerLink": product["offerLink"],
+                        "commissionRate": product["commissionRate"],
+                        "shopName": f"ร้านที่ {i+1}",  # Shopee API ไม่มี shopName จริง ๆ สมมติไปก่อน
+                        "image": "https://via.placeholder.com/150"  # Shopee API ไม่มีภาพ สมมติไปก่อน
+                    }
+                    for i, product in enumerate(shopee_products[:5])  # จำกัด 5 รายการ
+                ]
             else:
                 plant_info["price"] = "ไม่มีข้อมูล"
                 plant_info["affiliateLink"] = "https://shopee.co.th/search?keyword=" + search_name
@@ -196,26 +210,28 @@ async def analyze_image(file: UploadFile = File(None), name: str = Form(None)):
 
         # ดึง Related Plants จาก Shopee API
         related_plants = []
-        related_keywords = ["ไม้พุ่มดอกสีม่วง", "ไม้ประดับ"]  # สามารถปรับแต่ง Keyword ได้
+        related_keywords = ["ไม้พุ่มดอกสีม่วง", "ไม้ประดับ"]
         for related_keyword in related_keywords:
             related_products = await get_shopee_products(related_keyword)
             if related_products:
                 cheapest_related = min(related_products, key=lambda x: float(x["price"]))
                 related_plants.append({
                     "name": related_keyword,
-                    "price": f"{cheapest_related['price']} บาท"
+                    "price": f"{cheapest_related['price']} บาท",
+                    "image": "https://via.placeholder.com/100"  # เพิ่มฟิลด์ image
                 })
             if len(related_plants) >= 2:  # จำกัดที่ 2 รายการ
                 break
         if not related_plants:
             related_plants = [
-                {"name": "ชบา (Hibiscus)", "price": "~150 บาท"},
-                {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท"}
+                {"name": "ชบา (Hibiscus)", "price": "~150 บาท", "image": "https://via.placeholder.com/100"},
+                {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท", "image": "https://via.placeholder.com/100"}
             ]
         print("🌱 Related plants added")
 
         return {
             "plant_info": plant_info,
+            "affiliate_offers": affiliate_offers,  # เพิ่มฟิลด์ใหม่
             "related_plants": related_plants,
             "image_base64": image_base64  # ส่ง Base64 ของรูปกลับมา
         }
@@ -231,14 +247,14 @@ async def analyze_image(file: UploadFile = File(None), name: str = Form(None)):
                 "gardenIdeas": "ไม่มีข้อมูล",
                 "affiliateLink": "https://shopee.co.th/plant-link"
             },
+            "affiliate_offers": [],  # เพิ่มฟิลด์ใหม่ในกรณี Error
             "related_plants": [
-                {"name": "ชบา (Hibiscus)", "price": "~150 บาท"},
-                {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท"}
+                {"name": "ชบา (Hibiscus)", "price": "~150 บาท", "image": "https://via.placeholder.com/100"},
+                {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท", "image": "https://via.placeholder.com/100"}
             ],
             "image_base64": None
         }
 
-# ส่วน GET และ Popular Plants คงไว้ตามเดิม
 @router.get("/identify/")
 async def identify_plant_by_name(name: str = None):
     print("🚀 Entering GET /identify/ endpoint")
@@ -309,6 +325,7 @@ async def identify_plant_by_name(name: str = None):
 
         # ดึงข้อมูลจาก Shopee API
         identified_name = plant_info.get("name", "")
+        affiliate_offers = []
         if identified_name and identified_name != "ไม่สามารถระบุได้":
             search_name = re.split(r'\s*\(', identified_name)[0].strip()  # เช่น "พยับหมอก"
             print(f"🔍 เรียก Shopee API ด้วยชื่อ: {search_name}")
@@ -317,6 +334,18 @@ async def identify_plant_by_name(name: str = None):
                 cheapest_product = min(shopee_products, key=lambda x: float(x["price"]))
                 plant_info["price"] = f"{cheapest_product['price']} บาท"
                 plant_info["affiliateLink"] = cheapest_product["offerLink"]
+
+                # เตรียม affiliate_offers (เลือก 3-5 รายการ)
+                affiliate_offers = [
+                    {
+                        "price": f"{product['price']} บาท",
+                        "offerLink": product["offerLink"],
+                        "commissionRate": product["commissionRate"],
+                        "shopName": f"ร้านที่ {i+1}",  # Shopee API ไม่มี shopName จริง ๆ สมมติไปก่อน
+                        "image": "https://via.placeholder.com/150"  # Shopee API ไม่มีภาพ สมมติไปก่อน
+                    }
+                    for i, product in enumerate(shopee_products[:5])
+                ]
             else:
                 plant_info["price"] = "ไม่มีข้อมูล"
                 plant_info["affiliateLink"] = "https://shopee.co.th/search?keyword=" + search_name
@@ -326,27 +355,29 @@ async def identify_plant_by_name(name: str = None):
 
         # ดึง Related Plants จาก Shopee API
         related_plants = []
-        related_keywords = ["ไม้พุ่มดอกสีม่วง", "ไม้ประดับ"]  # สามารถปรับแต่ง Keyword ได้
+        related_keywords = ["ไม้พุ่มดอกสีม่วง", "ไม้ประดับ"]
         for related_keyword in related_keywords:
             related_products = await get_shopee_products(related_keyword)
             if related_products:
                 cheapest_related = min(related_products, key=lambda x: float(x["price"]))
                 related_plants.append({
                     "name": related_keyword,
-                    "price": f"{cheapest_related['price']} บาท"
+                    "price": f"{cheapest_related['price']} บาท",
+                    "image": "https://via.placeholder.com/100"
                 })
-            if len(related_plants) >= 2:  # จำกัดที่ 2 รายการ
+            if len(related_plants) >= 2:
                 break
         if not related_plants:
             related_plants = [
-                {"name": "ชบา (Hibiscus)", "price": "~150 บาท"},
-                {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท"}
+                {"name": "ชบา (Hibiscus)", "price": "~150 บาท", "image": "https://via.placeholder.com/100"},
+                {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท", "image": "https://via.placeholder.com/100"}
             ]
         print("🌱 Related plants added (GET)")
 
         print("✅ Returning response from GET /identify/")
         return {
             "plant_info": plant_info,
+            "affiliate_offers": affiliate_offers,
             "related_plants": related_plants,
             "image_base64": None  # ไม่มีรูปใน GET
         }
@@ -362,9 +393,10 @@ async def identify_plant_by_name(name: str = None):
                 "gardenIdeas": "ไม่มีข้อมูล",
                 "affiliateLink": "https://shopee.co.th/plant-link"
             },
+            "affiliate_offers": [],
             "related_plants": [
-                {"name": "ชบา (Hibiscus)", "price": "~150 บาท"},
-                {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท"}
+                {"name": "ชบา (Hibiscus)", "price": "~150 บาท", "image": "https://via.placeholder.com/100"},
+                {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท", "image": "https://via.placeholder.com/100"}
             ],
             "image_base64": None
         }
