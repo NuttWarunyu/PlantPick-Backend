@@ -9,6 +9,8 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 from app.routers.search import get_popular_plants
 from PIL import Image
 import requests
+import time
+import hashlib
 
 # โหลดค่า API Key จาก .env
 load_dotenv()
@@ -18,6 +20,67 @@ if not OPENAI_API_KEY:
     raise ValueError("❌ OPENAI_API_KEY ยังไม่ถูกตั้งค่า")
 
 router = APIRouter()
+
+# ฟังก์ชันดึงข้อมูลจาก Shopee API
+async def get_shopee_products(keyword: str, page: int = 0):
+    APP_ID = "15394330041"
+    SECRET = "IHYZSY7SCPNEYRSMPYSK2CKKYANVD5ZY"
+    API_URL = "https://open-api.affiliate.shopee.co.th/graphql"
+
+    query = """
+    query Fetch($page: Int, $keyword: String) {
+        productOfferV2(
+            listType: 0,
+            sortType: 2,
+            page: $page,
+            limit: 10,
+            keyword: $keyword
+        ) {
+            nodes {
+                commissionRate
+                commission
+                price
+                productLink
+                offerLink
+            }
+        }
+    }
+    """
+    query = ' '.join(query.split())
+
+    payload = {
+        "query": query,
+        "operationName": "Fetch",
+        "variables": {
+            "page": page,
+            "keyword": keyword
+        }
+    }
+
+    payload_str = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
+
+    timestamp = int(time.time())
+    base_string = f"{APP_ID}{timestamp}{payload_str}{SECRET}"
+    signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"SHA256 Credential={APP_ID},Timestamp={timestamp},Signature={signature}"
+    }
+
+    print(f"📦 Shopee API Request for '{keyword}': Payload={payload_str}, Signature={signature}")
+    try:
+        response = requests.post(API_URL, data=payload_str.encode("utf-8"), headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        print(f"📦 Shopee API Response for '{keyword}': {data}")
+        if "errors" in data:
+            print(f"❌ Shopee API Error for '{keyword}': {data['errors'][0]['message']}")
+            return []
+        return data["data"]["productOfferV2"]["nodes"]
+    except Exception as e:
+        print(f"❌ Shopee API Exception for '{keyword}': {str(e)}")
+        return []
 
 @router.post("/identify/")
 async def analyze_image(file: UploadFile = File(None), name: str = Form(None)):
@@ -113,19 +176,42 @@ async def analyze_image(file: UploadFile = File(None), name: str = Form(None)):
             }
             print("🔧 Fallback to default plant info")
 
-        # เพิ่ม affiliateLink (สมมติ)
-        if name and name.lower() == "สนฉัตร":
-            plant_info["affiliateLink"] = "https://s.shopee.co.th/LaUEi5wS0"
-        elif name and name.lower() == "เฟื่องฟ้า":
-            plant_info["affiliateLink"] = "https://s.shopee.co.th/6VB7aQvBLg"
+        # ดึงข้อมูลจาก Shopee API โดยใช้ชื่อที่ OpenAI ระบุ
+        identified_name = plant_info.get("name", "")
+        if identified_name and identified_name != "ไม่สามารถระบุได้":
+            # ใช้เฉพาะชื่อต้นไม้ (ตัดส่วนลักษณะเด่นออก เช่น "ดอกสีฟ้า")
+            search_name = re.split(r'\s*\(', identified_name)[0].strip()  # เช่น "พยับหมอก"
+            print(f"🔍 เรียก Shopee API ด้วยชื่อ: {search_name}")
+            shopee_products = await get_shopee_products(search_name)
+            if shopee_products:
+                cheapest_product = min(shopee_products, key=lambda x: float(x["price"]))
+                plant_info["price"] = f"{cheapest_product['price']} บาท"
+                plant_info["affiliateLink"] = cheapest_product["offerLink"]
+            else:
+                plant_info["price"] = "ไม่มีข้อมูล"
+                plant_info["affiliateLink"] = "https://shopee.co.th/search?keyword=" + search_name
         else:
+            plant_info["price"] = "ไม่มีข้อมูล"
             plant_info["affiliateLink"] = "https://shopee.co.th/plant-link"
 
-        # เพิ่ม related_plants (สมมติ)
-        related_plants = [
-            {"name": "ชบา (Hibiscus)", "price": "~150 บาท"},
-            {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท"}
-        ]
+        # ดึง Related Plants จาก Shopee API
+        related_plants = []
+        related_keywords = ["ไม้พุ่มดอกสีม่วง", "ไม้ประดับ"]  # สามารถปรับแต่ง Keyword ได้
+        for related_keyword in related_keywords:
+            related_products = await get_shopee_products(related_keyword)
+            if related_products:
+                cheapest_related = min(related_products, key=lambda x: float(x["price"]))
+                related_plants.append({
+                    "name": related_keyword,
+                    "price": f"{cheapest_related['price']} บาท"
+                })
+            if len(related_plants) >= 2:  # จำกัดที่ 2 รายการ
+                break
+        if not related_plants:
+            related_plants = [
+                {"name": "ชบา (Hibiscus)", "price": "~150 บาท"},
+                {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท"}
+            ]
         print("🌱 Related plants added")
 
         return {
@@ -152,9 +238,10 @@ async def analyze_image(file: UploadFile = File(None), name: str = Form(None)):
             "image_base64": None
         }
 
+# ส่วน GET และ Popular Plants คงไว้ตามเดิม
 @router.get("/identify/")
 async def identify_plant_by_name(name: str = None):
-    print("🚀 Entering GET /identify/ endpoint")  # Debug: ตรวจสอบว่าเข้ามาใน Endpoint นี้
+    print("🚀 Entering GET /identify/ endpoint")
     try:
         print("📝 วิเคราะห์ชื่อ (GET):", name)
         if not name:
@@ -220,19 +307,41 @@ async def identify_plant_by_name(name: str = None):
             }
             print("🔧 Fallback to default plant info (GET)")
 
-        # เพิ่ม affiliateLink (สมมติ)
-        if name.lower() == "สนฉัตร":
-            plant_info["affiliateLink"] = "https://s.shopee.co.th/LaUEi5wS0"
-        elif name.lower() == "เฟื่องฟ้า":
-            plant_info["affiliateLink"] = "https://s.shopee.co.th/6VB7aQvBLg"
+        # ดึงข้อมูลจาก Shopee API
+        identified_name = plant_info.get("name", "")
+        if identified_name and identified_name != "ไม่สามารถระบุได้":
+            search_name = re.split(r'\s*\(', identified_name)[0].strip()  # เช่น "พยับหมอก"
+            print(f"🔍 เรียก Shopee API ด้วยชื่อ: {search_name}")
+            shopee_products = await get_shopee_products(search_name)
+            if shopee_products:
+                cheapest_product = min(shopee_products, key=lambda x: float(x["price"]))
+                plant_info["price"] = f"{cheapest_product['price']} บาท"
+                plant_info["affiliateLink"] = cheapest_product["offerLink"]
+            else:
+                plant_info["price"] = "ไม่มีข้อมูล"
+                plant_info["affiliateLink"] = "https://shopee.co.th/search?keyword=" + search_name
         else:
+            plant_info["price"] = "ไม่มีข้อมูล"
             plant_info["affiliateLink"] = "https://shopee.co.th/plant-link"
 
-        # เพิ่ม related_plants (สมมติ)
-        related_plants = [
-            {"name": "ชบา (Hibiscus)", "price": "~150 บาท"},
-            {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท"}
-        ]
+        # ดึง Related Plants จาก Shopee API
+        related_plants = []
+        related_keywords = ["ไม้พุ่มดอกสีม่วง", "ไม้ประดับ"]  # สามารถปรับแต่ง Keyword ได้
+        for related_keyword in related_keywords:
+            related_products = await get_shopee_products(related_keyword)
+            if related_products:
+                cheapest_related = min(related_products, key=lambda x: float(x["price"]))
+                related_plants.append({
+                    "name": related_keyword,
+                    "price": f"{cheapest_related['price']} บาท"
+                })
+            if len(related_plants) >= 2:  # จำกัดที่ 2 รายการ
+                break
+        if not related_plants:
+            related_plants = [
+                {"name": "ชบา (Hibiscus)", "price": "~150 บาท"},
+                {"name": "ดอกเข็ม (Ixora)", "price": "~80 บาท"}
+            ]
         print("🌱 Related plants added (GET)")
 
         print("✅ Returning response from GET /identify/")
