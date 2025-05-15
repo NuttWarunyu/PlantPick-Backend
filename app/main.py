@@ -17,6 +17,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 origins = [
     "http://localhost:5173",
     "https://plantpick-frontend.up.railway.app",
+    "https://plantpick.app",  # เพิ่ม Custom Domain ใหม่
 ]
 
 app.add_middleware(
@@ -29,7 +30,7 @@ app.add_middleware(
 
 # Include Routers
 app.include_router(upload.router, prefix="/upload", tags=["Upload"])
-app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])  # Prefix ยังคงเป็น /shopee
+app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])
 app.include_router(identify.router, tags=["Identify"])
 app.include_router(search.router, tags=["Search"])
 
