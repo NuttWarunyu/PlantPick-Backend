@@ -1,7 +1,7 @@
 import os
 import uvicorn
 from fastapi import FastAPI
-from app.routers import upload, shopee, identify, search
+from app.routers import upload, shopee, identify, search, generate_garden
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,10 +14,11 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+# CORS settings for Railway
 origins = [
-    "http://localhost:5173",
-    "https://plantpick-frontend.up.railway.app",
-    "https://plantpick.app",  # เพิ่ม Custom Domain ใหม่
+    "http://localhost:5173",  # Local development
+    "https://<your-railway-app-name>.up.railway.app",  # Replace with your Railway domain
+    "https://plantpick.app",  # Custom domain (if set up)
 ]
 
 app.add_middleware(
@@ -33,21 +34,10 @@ app.include_router(upload.router, prefix="/upload", tags=["Upload"])
 app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])
 app.include_router(identify.router, tags=["Identify"])
 app.include_router(search.router, tags=["Search"])
-
-# Test Endpoints
-@app.get("/")
-def root():
-    return {"message": "Welcome to PlantPick API"}
-
-@app.get("/marketplace")
-async def get_marketplace():
-    return [
-        {"name": "สนฉัตร", "price": "~200 บาท"},
-        {"name": "เฟื่องฟ้า", "price": "~150 บาท"}
-    ]
+app.include_router(generate_garden.router, prefix="/garden", tags=["Garden"])  # Add prefix
 
 if __name__ == "__main__":
     print("🚀 Railway is running `main.py`!")
-    port = os.getenv("PORT", "8000")
+    port = int(os.getenv("PORT", 8000))  # Ensure port is integer
     print(f"✅ Running on port: {port}")
-    uvicorn.run(app, host="0.0.0.0", port=int(port))
+    uvicorn.run(app, host="0.0.0.0", port=port)
