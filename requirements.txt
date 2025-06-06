@@ -5,3 +5,7 @@ python-dotenv==1.0.1
 python-multipart==0.0.9
 openai==1.68.2
 pillow==10.4.0
+numpy
+torch
+diffusers
+transformers
