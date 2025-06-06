@@ -1,2 +1,6 @@
+__pycache__/
+*.pyc
+*.png
+*.pth
+venv/
 .env
-.env # เพิ่ม .env ลงใน .gitignore

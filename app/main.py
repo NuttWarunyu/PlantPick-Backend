@@ -17,7 +17,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # CORS settings for Railway
 origins = [
     "http://localhost:5173",  # Local development
-    "https://<your-railway-app-name>.up.railway.app",  # Replace with your Railway domain
+    "https://plantpick-backend.up.railway.app",  # Replace with your Railway domain
     "https://plantpick.app",  # Custom domain (if set up)
 ]
 
