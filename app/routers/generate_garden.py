@@ -55,7 +55,8 @@ async def generate_garden(
             print(f"[{timestamp}] Poll attempt {attempt+1}: status = {poll['status']}")
 
             if poll["status"] == "succeeded":
-                return {"status": "success", "result_url": poll["output"]}
+                correct_url = poll["output"][1] if len(poll["output"]) > 1 else poll["output"][0]
+                return {"status": "success", "result_url": correct_url}
             elif poll["status"] == "failed":
                 return JSONResponse(status_code=500, content={"error": "Prediction failed"})
 
