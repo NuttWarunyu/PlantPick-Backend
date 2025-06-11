@@ -6,14 +6,13 @@ from datetime import datetime
 
 router = APIRouter()
 
-# --- Convert image to base64 string ---
 def image_to_base64(img: Image.Image) -> str:
     buffered = io.BytesIO()
     img.save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-@router.post("/generate-garden")
-async def generate_garden(
+@router.post("/test-garden")
+async def test_garden(
     image: UploadFile = File(...),
     prompt: str = Form(...)
 ):
