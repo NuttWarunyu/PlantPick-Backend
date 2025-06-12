@@ -66,3 +66,50 @@ async def generate_garden(
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+# --- WARM UP ENDPOINT ---
+@router.get("/ping-replicate")
+async def ping_replicate():
+    """Ping the model on Replicate to keep it warm without generating real images."""
+    dummy_image = Image.new("RGB", (64, 64), (255, 255, 255))  # plain white
+    image_b64 = image_to_base64(dummy_image)
+
+    try:
+        payload = {
+            "version": "922c7bb67b87ec32cbc2fd11b1d5f94f0ba4f5519c4dbd02856376444127cc60",
+            "input": {
+                "image": f"data:image/png;base64,{image_b64}",
+                "prompt": "Ping test to keep model warm",
+                "num_samples": "1",
+                "image_resolution": "256",
+                "detect_resolution": 256,
+                "ddim_steps": 1,
+                "scale": 1,
+                "a_prompt": "",
+                "n_prompt": ""
+            }
+        }
+
+        headers = {
+            "Authorization": f"Token {os.getenv('REPLICATE_API_TOKEN')}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=headers)
+        if response.status_code != 201:
+            return JSONResponse(status_code=500, content={"error": "Replicate ping failed", "details": response.text})
+
+        prediction_url = response.json()["urls"]["get"]
+
+        # Poll only 1–2 times and stop
+        for _ in range(2):
+            poll = requests.get(prediction_url, headers=headers).json()
+            if poll["status"] == "succeeded" or poll["status"] == "processing":
+                return {"status": "ping sent"}
+
+            time.sleep(1)
+
+        return JSONResponse(status_code=202, content={"status": "ping sent but not confirmed"})
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
