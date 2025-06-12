@@ -50,7 +50,7 @@ async def generate_garden(
 
         prediction_url = response.json()["urls"]["get"]
 
-        for attempt in range(45):
+        for attempt in range(100):
             poll = requests.get(prediction_url, headers=headers).json()
             print(f"[{timestamp}] Poll attempt {attempt+1}: status = {poll['status']}")
 
