@@ -190,7 +190,7 @@ async def generate_bom(history_id: int = Form(...), db: Session = Depends(get_db
     # สมมติสร้าง BOM (จะขยาย AI ทีหลัง)
     bom = BOMDetail(
         history_id=history_id,
-        material_name="ดินปลูก",
+        material_name="ดินปลูกต้นไม้",
         quantity=10,
         estimated_cost=5.00,
         affiliate_link="https://shopee.co.th/dirt",
