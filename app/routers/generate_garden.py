@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
-from PIL import Image, ImageResampling  # เพิ่ม ImageResampling
+from PIL import Image  # เปลี่ยนจาก Image, ImageResampling
 import os, io, base64, time, requests
 from datetime import datetime
 import redis
@@ -32,7 +32,7 @@ def image_to_base64(img: Image.Image) -> str:
 
 # Resize image (optional optimization)
 def resize_image(img: Image.Image, size: int = 384) -> Image.Image:
-    return img.resize((size, size), ImageResampling.LANCZOS)  # ระบุ ImageResampling
+    return img.resize((size, size), Image.Resampling.LANCZOS)  # ใช้ Image.Resampling
 
 @router.post("/generate-garden")
 async def generate_garden(
