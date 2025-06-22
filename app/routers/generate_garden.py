@@ -5,7 +5,8 @@ import os, io, base64, time, requests
 from datetime import datetime
 import redis
 from sqlalchemy.orm import Session
-from database import SessionLocal, UsageLimit, GenerationHistory, BOMDetail, GardenRequest
+from app.database import SessionLocal, UsageLimit, GenerationHistory, BOMDetail, GardenRequest
+from supabase import create_client, Client
 
 router = APIRouter()
 
@@ -15,6 +16,11 @@ if redis_url:
     redis_client = redis.from_url(redis_url)
 else:
     redis_client = redis.Redis(host=os.getenv("REDIS_HOST", "localhost"), port=int(os.getenv("REDIS_PORT", 6379)), db=0)
+
+# Supabase Storage setup
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Dependency for database session
 def get_db():
@@ -31,49 +37,57 @@ def image_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 # Resize image (optional optimization)
-def resize_image(img: Image.Image, size: int = 384) -> Image.Image:
+def resize_image(img: Image.Image, size: int = 512) -> Image.Image:
     return img.resize((size, size), Image.Resampling.LANCZOS)  # ใช้ Image.Resampling
 
 @router.post("/generate-garden")
 async def generate_garden(
     image: UploadFile = File(...),
     prompt: str = Form(...),
-    ref_code: str = Form(None),  # สำหรับโบนัสแชร์
+    ref_code: str = Form(None),
     request: Request = None,
     db: Session = Depends(get_db)
 ):
     timestamp = datetime.now().strftime("%H:%M:%S")
     user_ip = request.client.host
     user_agent = request.headers.get("user-agent")
+    print(f"[{timestamp}] 🔍 New request from {user_ip} - Prompt: {prompt}")
 
     # Check daily limit
     key = f"ip:{user_ip}:daily_limit"
     try:
         daily_used = int(redis_client.get(key) or 0)
+        print(f"[{timestamp}] 📊 Redis daily usage for IP {user_ip}: {daily_used}")
     except redis.RedisError as e:
+        print(f"[{timestamp}] ❌ Redis error: {str(e)}")
         return JSONResponse(status_code=500, content={"error": f"Redis error: {str(e)}"})
+
     share_bonus = 5 if ref_code and redis_client.get(f"ref:{ref_code}:claimed") else 0
     total_limit = 3 + share_bonus
     if daily_used >= total_limit:
+        print(f"[{timestamp}] 🚫 Daily limit exceeded ({daily_used}/{total_limit})")
         raise HTTPException(status_code=403, detail=f"Daily limit of {total_limit} exceeded")
 
     # Process image
-    image_bytes = await image.read()
     try:
+        image_bytes = await image.read()
         original_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         original_img = resize_image(original_img)
         image_b64 = image_to_base64(original_img)
+        print(f"[{timestamp}] 🖼️ Image processed and converted to base64")
     except Exception as e:
+        print(f"[{timestamp}] ❌ Image processing error: {str(e)}")
         return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
 
+    # Send to Replicate
     payload = {
         "version": "922c7bb67b87ec32cbc2fd11b1d5f94f0ba4f5519c4dbd02856376444127cc60",
         "input": {
             "image": f"data:image/png;base64,{image_b64}",
             "prompt": prompt,
             "num_samples": "1",
-            "image_resolution": "384",
-            "detect_resolution": 384,
+            "image_resolution": "512",
+            "detect_resolution": 512,
             "ddim_steps": 10,
             "scale": 7.5,
             "a_prompt": "best quality, extremely detailed, photorealistic garden design",
@@ -88,9 +102,11 @@ async def generate_garden(
 
     response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=headers)
     if response.status_code != 201:
+        print(f"[{timestamp}] ❌ Replicate request failed: {response.text}")
         return JSONResponse(status_code=500, content={"error": "Replicate request failed", "details": response.text})
 
     prediction_url = response.json()["urls"]["get"]
+    print(f"[{timestamp}] ⏳ Prediction started: {prediction_url}")
 
     for attempt in range(30):
         poll = requests.get(prediction_url, headers=headers).json()
@@ -98,14 +114,18 @@ async def generate_garden(
 
         if poll["status"] == "succeeded":
             correct_url = poll["output"][1] if len(poll["output"]) > 1 else poll["output"][0]
-            # Update limit
+            print(f"[{timestamp}] ✅ Prediction succeeded. Image URL: {correct_url}")
+
+            # Update Redis usage
             try:
                 redis_client.set(key, daily_used + 1)
                 redis_client.expire(key, 24 * 3600)
+                print(f"[{timestamp}] 🔄 Redis usage updated for {user_ip}")
             except redis.RedisError as e:
+                print(f"[{timestamp}] ❌ Redis update error: {str(e)}")
                 return JSONResponse(status_code=500, content={"error": f"Redis update error: {str(e)}"})
 
-            # Store generation history
+            # Save to DB
             try:
                 history = GenerationHistory(
                     ip=user_ip,
@@ -117,8 +137,10 @@ async def generate_garden(
                 )
                 db.add(history)
                 db.commit()
+                print(f"[{timestamp}] 🗂️ History saved with ID: {history.history_id}")
             except Exception as e:
                 db.rollback()
+                print(f"[{timestamp}] ❌ Database error: {str(e)}")
                 return JSONResponse(status_code=500, content={"error": f"Database error: {str(e)}"})
 
             return {
@@ -127,11 +149,14 @@ async def generate_garden(
                 "remaining": total_limit - (daily_used + 1),
                 "history_id": history.history_id
             }
+
         elif poll["status"] == "failed":
+            print(f"[{timestamp}] ❌ Prediction failed")
             return JSONResponse(status_code=500, content={"error": "Prediction failed"})
 
         time.sleep(3)
 
+    print(f"[{timestamp}] ⏰ Prediction timed out after 30 attempts")
     return JSONResponse(status_code=504, content={"error": "Prediction timed out"})
 
 # WARM UP ENDPOINT
@@ -225,3 +250,15 @@ async def request_garden(
     db.add(request)
     db.commit()
     return {"status": "success", "request_id": request.request_id}
+
+@router.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        filename = f"{int(time.time())}_{file.filename}"
+        supabase.storage.from_("generated-gardens").upload(file=contents, path=filename, file_options={"content-type": file.content_type})
+
+        public_url = supabase.storage.from_("generated-gardens").get_public_url(filename)
+        return {"status": "success", "url": public_url}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Upload failed: {str(e)}"})
