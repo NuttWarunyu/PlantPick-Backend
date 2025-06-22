@@ -1,17 +1,18 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
-from PIL import Image  # เปลี่ยนจาก Image, ImageResampling
+from PIL import Image
 import os, io, base64, time, requests
 from datetime import datetime
 import redis
 from sqlalchemy.orm import Session
 from app.database import SessionLocal, UsageLimit, GenerationHistory, BOMDetail, GardenRequest
 from supabase import create_client, Client
+from .analyze_bom import analyze_bom, analyze_bom_from_image, BOMItem  # อัปเดตการนำเข้า
 
 router = APIRouter()
 
 # Redis setup with Railway environment
-redis_url = os.getenv("REDIS_URL")  # Railway จะให้ REDIS_URL
+redis_url = os.getenv("REDIS_URL")
 if redis_url:
     redis_client = redis.from_url(redis_url)
 else:
@@ -38,7 +39,7 @@ def image_to_base64(img: Image.Image) -> str:
 
 # Resize image (optional optimization)
 def resize_image(img: Image.Image, size: int = 512) -> Image.Image:
-    return img.resize((size, size), Image.Resampling.LANCZOS)  # ใช้ Image.Resampling
+    return img.resize((size, size), Image.Resampling.LANCZOS)
 
 @router.post("/generate-garden")
 async def generate_garden(
@@ -206,36 +207,54 @@ async def ping_replicate():
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 from pydantic import BaseModel
+from .analyze_bom import analyze_bom, analyze_bom_from_image, BOMItem  # อัปเดตการนำเข้า
 
 class BOMRequest(BaseModel):
     history_id: int
 
 @router.post("/generate-bom")
 async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] 🔍 Generating BOM for history_id: {req.history_id}")
+
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == req.history_id).first()
     if not history:
         raise HTTPException(status_code=404, detail="History not found")
+    if not history.image_url:
+        raise HTTPException(status_code=400, detail="No image available for analysis")
 
-    bom = BOMDetail(
-        history_id=req.history_id,
-        material_name="ดินปลูกต้นไม้",
-        quantity=10,
-        estimated_cost=5.00,
-        affiliate_link="https://shopee.co.th/dirt",
-        created_at=datetime.now()
-    )
-    db.add(bom)
-    db.commit()
+    # เรียกใช้ฟังก์ชันวิเคราะห์จากภาพ
+    try:
+        bom_items = analyze_bom_from_image(req.history_id, history.image_url, db)
+        print(f"[{timestamp}] ✅ BOM analyzed from image: {len(bom_items)} items")
+    except ValueError as e:
+        print(f"[{timestamp}] ❌ BOM analysis error: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": f"BOM analysis failed: {str(e)}"})
 
-    return {
-        "status": "success",
-        "bom_id": bom.bom_id,
-        "bom": [{
+    # บันทึก BOM ลง database
+    bom_details = []
+    for item in bom_items:
+        bom = BOMDetail(
+            history_id=req.history_id,
+            material_name=item.material_name,
+            quantity=item.quantity,
+            estimated_cost=item.estimated_cost,
+            affiliate_link=item.affiliate_link,
+            created_at=datetime.now()
+        )
+        db.add(bom)
+        db.commit()
+        bom_details.append({
             "material_name": bom.material_name,
             "quantity": bom.quantity,
             "estimated_cost": bom.estimated_cost,
             "affiliate_link": bom.affiliate_link,
-        }]
+            "bom_id": bom.bom_id
+        })
+
+    return {
+        "status": "success",
+        "bom_details": bom_details
     }
 
 @router.post("/upload-image")
