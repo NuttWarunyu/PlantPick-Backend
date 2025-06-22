@@ -205,16 +205,19 @@ async def ping_replicate():
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# Endpoint สำหรับ BOM
+from pydantic import BaseModel
+
+class BOMRequest(BaseModel):
+    history_id: int
+
 @router.post("/generate-bom")
-async def generate_bom(history_id: int = Form(...), db: Session = Depends(get_db)):
-    history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
+async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
+    history = db.query(GenerationHistory).filter(GenerationHistory.history_id == req.history_id).first()
     if not history:
         raise HTTPException(status_code=404, detail="History not found")
 
-    # สมมติสร้าง BOM (จะขยาย AI ทีหลัง)
     bom = BOMDetail(
-        history_id=history_id,
+        history_id=req.history_id,
         material_name="ดินปลูกต้นไม้",
         quantity=10,
         estimated_cost=5.00,
@@ -223,33 +226,17 @@ async def generate_bom(history_id: int = Form(...), db: Session = Depends(get_db
     )
     db.add(bom)
     db.commit()
-    return {"status": "success", "bom_id": bom.bom_id}
 
-# Endpoint สำหรับแจ้งจัดสวน
-@router.post("/request-garden")
-async def request_garden(
-    history_id: int = Form(...),
-    budget: float = Form(...),
-    location: str = Form(...),
-    additional_details: str = Form(None),
-    db: Session = Depends(get_db)
-):
-    history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
-    if not history:
-        raise HTTPException(status_code=404, detail="History not found")
-
-    request = GardenRequest(
-        history_id=history_id,
-        budget=budget,
-        location=location,
-        additional_details=additional_details,
-        status="pending",
-        created_at=datetime.now(),
-        fee_charged=5.00
-    )
-    db.add(request)
-    db.commit()
-    return {"status": "success", "request_id": request.request_id}
+    return {
+        "status": "success",
+        "bom_id": bom.bom_id,
+        "bom": [{
+            "material_name": bom.material_name,
+            "quantity": bom.quantity,
+            "estimated_cost": bom.estimated_cost,
+            "affiliate_link": bom.affiliate_link,
+        }]
+    }
 
 @router.post("/upload-image")
 async def upload_image(file: UploadFile = File(...)):
