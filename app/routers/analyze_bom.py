@@ -54,7 +54,7 @@ def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
         return default_bom_fallback()
 
 
-def analyze_bom_from_image(history_id: int, image_url: str, db: Session) -> List[BOMItem]:
+def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget: Optional[float] = None) -> List[BOMItem]:
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
     if not history:
         raise ValueError("History not found")
@@ -71,13 +71,17 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session) -> List
     image_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    prompt = "Analyze this garden image and suggest a list of materials with material_name, quantity, estimated_cost (in USD, max 2 decimal places), and affiliate_link. Use only these materials: trees, flowers, pathways, fountains, stones, planting soil, lawn. Return in JSON format."
+    if budget:
+        prompt += f" Keep the total estimated_cost within {budget} USD."
+
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Analyze this garden image and suggest a list of materials with material_name, quantity, estimated_cost (in USD, max 2 decimal places), and affiliate_link. Use only these materials: trees, flowers, pathways, fountains, stones, planting soil, lawn. Return in JSON format."},
+                    {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
                 ]
             }
