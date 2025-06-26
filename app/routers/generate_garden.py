@@ -64,7 +64,7 @@ async def generate_garden(
         return JSONResponse(status_code=500, content={"error": f"Redis error: {str(e)}"})
 
     share_bonus = 5 if ref_code and redis_client.get(f"ref:{ref_code}:claimed") else 0
-    total_limit = 3 + share_bonus
+    total_limit = 300 + share_bonus
     if daily_used >= total_limit:
         print(f"[{timestamp}] 🚫 Daily limit exceeded ({daily_used}/{total_limit})")
         raise HTTPException(status_code=403, detail=f"Daily limit of {total_limit} exceeded")
