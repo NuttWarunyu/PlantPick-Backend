@@ -1,22 +1,23 @@
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 import os
 from openai import OpenAI
 from sqlalchemy.orm import Session
-from app.database import BOMDetail, GenerationHistory  # Import จาก database.py
+from app.database import BOMDetail, GenerationHistory
 import requests
 from PIL import Image
 import io
 import base64
+import json
 
-# Model สำหรับ BOM Item
+
 class BOMItem(BaseModel):
     material_name: str
     quantity: int
-    estimated_cost: float  # ใช้ float เพื่อเข้ากับ DECIMAL
+    estimated_cost: float
     affiliate_link: str
 
-# ฟังก์ชันวิเคราะห์ BOM โดยใช้ AI จาก prompt
+
 def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
     if not history:
@@ -35,38 +36,29 @@ def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
     )
 
     try:
-        import json
         bom_data = json.loads(response.choices[0].message.content)
         if not isinstance(bom_data, list):
             bom_data = [bom_data]
 
-        bom_items = []
-        for item in bom_data:
-            bom_items.append(BOMItem(
+        return [
+            BOMItem(
                 material_name=item.get("material_name", "Unknown"),
                 quantity=item.get("quantity", 1),
                 estimated_cost=float(item.get("estimated_cost", 0.0)),
                 affiliate_link=item.get("affiliate_link", "")
-            ))
-        return bom_items
-    except (json.JSONDecodeError, KeyError, ValueError) as e:
-        print(f"Error parsing BOM from prompt: {str(e)}")
-        return [
-            BOMItem(
-                material_name="planting soil",
-                quantity=10,
-                estimated_cost=5.00,
-                affiliate_link="https://shopee.co.th/dirt"
             )
+            for item in bom_data
         ]
+    except Exception as e:
+        print(f"Error parsing BOM from prompt: {str(e)}")
+        return default_bom_fallback()
 
-# ฟังก์ชันวิเคราะห์ BOM จากภาพ
+
 def analyze_bom_from_image(history_id: int, image_url: str, db: Session) -> List[BOMItem]:
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
     if not history:
         raise ValueError("History not found")
 
-    # ดาวน์โหลดภาพจาก URL
     try:
         response = requests.get(image_url)
         response.raise_for_status()
@@ -74,15 +66,13 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session) -> List
     except Exception as e:
         raise ValueError(f"Failed to load image from {image_url}: {str(e)}")
 
-    # แปลงภาพเป็น base64
     buffered = io.BytesIO()
     image.save(buffered, format="PNG")
     image_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    # ใช้ OpenAI Vision API เพื่อวิเคราะห์ภาพ
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     response = client.chat.completions.create(
-        model="gpt-4o",  # ใช้โมเดลที่รองรับ Vision
+        model="gpt-4o",
         messages=[
             {
                 "role": "user",
@@ -96,27 +86,90 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session) -> List
     )
 
     try:
-        import json
         bom_data = json.loads(response.choices[0].message.content)
         if not isinstance(bom_data, list):
             bom_data = [bom_data]
 
-        bom_items = []
-        for item in bom_data:
-            bom_items.append(BOMItem(
+        return [
+            BOMItem(
                 material_name=item.get("material_name", "Unknown"),
                 quantity=item.get("quantity", 1),
                 estimated_cost=float(item.get("estimated_cost", 0.0)),
                 affiliate_link=item.get("affiliate_link", "")
-            ))
-        return bom_items
-    except (json.JSONDecodeError, KeyError, ValueError) as e:
+            )
+            for item in bom_data
+        ]
+    except Exception as e:
         print(f"Error parsing BOM from image: {str(e)}")
+        return default_bom_fallback()
+
+
+def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
+    MATERIAL_CATALOG = [
+        {"material_name": "ทางเดิน", "unit": "งาน", "unit_price": 30000},
+        {"material_name": "ไม้ประธาน", "unit": "ต้น", "unit_price": 15000},
+        {"material_name": "ต้นพุ่ม", "unit": "ต้น", "unit_price": 250},
+        {"material_name": "ไม้ดอก", "unit": "ต้น", "unit_price": 120},
+        {"material_name": "สนามหญ้า", "unit": "ตร.ม.", "unit_price": 90},
+        {"material_name": "หินตกแต่ง", "unit": "ถุง", "unit_price": 80},
+        {"material_name": "น้ำพุ", "unit": "ชุด", "unit_price": 20000},
+        {"material_name": "วัสดุปลูก", "unit": "ถุง", "unit_price": 150},
+    ]
+
+    catalog_str = "\n".join(
+        [f"{item['material_name']} ({item['unit']}) - {item['unit_price']} บาท" for item in MATERIAL_CATALOG]
+    )
+
+    prompt = f"""
+คุณเป็นนักจัดสวน ลูกค้าต้องการจัดสวนโดยใช้งบประมาณไม่เกิน {budget} บาท
+วัสดุที่ใช้ได้มีตามนี้:
+
+{catalog_str}
+
+ช่วยเลือกวัสดุที่เหมาะสม พร้อมจำนวน และราคาคร่าวๆ (estimated_cost) โดยตอบกลับเป็น JSON array เท่านั้น เช่น:
+
+[
+  {{
+    "material_name": "สนามหญ้า",
+    "quantity": 50,
+    "estimated_cost": 4500,
+    "affiliate_link": "https://example.com/lawn"
+  }}
+]
+"""
+
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=400
+    )
+
+    try:
+        bom_data = json.loads(response.choices[0].message.content)
+        if not isinstance(bom_data, list):
+            bom_data = [bom_data]
+
         return [
             BOMItem(
-                material_name="planting soil",
-                quantity=10,
-                estimated_cost=5.00,
-                affiliate_link="https://shopee.co.th/dirt"
+                material_name=item.get("material_name", "Unknown"),
+                quantity=item.get("quantity", 1),
+                estimated_cost=float(item.get("estimated_cost", 0.0)),
+                affiliate_link=item.get("affiliate_link", "")
             )
+            for item in bom_data
         ]
+    except Exception as e:
+        print(f"Error parsing BOM from budget: {str(e)}")
+        return default_bom_fallback()
+
+
+def default_bom_fallback() -> List[BOMItem]:
+    return [
+        BOMItem(
+            material_name="วัสดุปลูก",
+            quantity=10,
+            estimated_cost=5.00,
+            affiliate_link="https://shopee.co.th/dirt"
+        )
+    ]
