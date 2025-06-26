@@ -10,13 +10,11 @@ import io
 import base64
 import json
 
-
 class BOMItem(BaseModel):
     material_name: str
     quantity: int
     estimated_cost: float
     affiliate_link: str
-
 
 def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
@@ -53,7 +51,6 @@ def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
         print(f"Error parsing BOM from prompt: {str(e)}")
         return default_bom_fallback()
 
-
 def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget: Optional[float] = None) -> List[BOMItem]:
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
     if not history:
@@ -73,7 +70,7 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     prompt = "Analyze this garden image and suggest a list of materials with material_name, quantity, estimated_cost (in USD, max 2 decimal places), and affiliate_link. Use only these materials: trees, flowers, pathways, fountains, stones, planting soil, lawn. Return in JSON format."
     if budget:
-        prompt += f" Keep the total estimated_cost within {budget} USD."
+        prompt += f" Ensure the total estimated_cost does not exceed {budget} USD."
 
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -90,9 +87,18 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
     )
 
     try:
-        bom_data = json.loads(response.choices[0].message.content)
+        raw_response = response.choices[0].message.content
+        print(f"Raw response from OpenAI: {raw_response}")  # Log raw response
+        bom_data = json.loads(raw_response)
         if not isinstance(bom_data, list):
             bom_data = [bom_data]
+
+        # ตรวจสอบว่า estimated_cost เกิน budget หรือไม่ (ถ้ามี)
+        if budget:
+            total_cost = sum(item.get("estimated_cost", 0.0) for item in bom_data)
+            if total_cost > budget:
+                print(f"Warning: Total estimated cost ({total_cost}) exceeds budget ({budget}). Adjusting...")
+                return analyze_bom_from_budget(budget)  # ใช้ budget-based fallback
 
         return [
             BOMItem(
@@ -103,10 +109,15 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
             )
             for item in bom_data
         ]
-    except Exception as e:
-        print(f"Error parsing BOM from image: {str(e)}")
+    except json.JSONDecodeError as e:
+        print(f"JSON Decode Error parsing BOM from image: {str(e)} - Raw response: {raw_response}")
+        if budget:
+            print("Falling back to budget-based analysis...")
+            return analyze_bom_from_budget(budget)
         return default_bom_fallback()
-
+    except Exception as e:
+        print(f"Error parsing BOM from image: {str(e)} - Raw response: {raw_response}")
+        return default_bom_fallback()
 
 def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
     MATERIAL_CATALOG = [
@@ -166,7 +177,6 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
     except Exception as e:
         print(f"Error parsing BOM from budget: {str(e)}")
         return default_bom_fallback()
-
 
 def default_bom_fallback() -> List[BOMItem]:
     return [
