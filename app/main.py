@@ -18,7 +18,6 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 origins = [
     "http://localhost:5173",  # Local development
     "https://plantpick-backend.up.railway.app",  # Replace with your Railway domain
-    "https://plantpick.app/garden-budget-ideas", # Gen Image Page
     "https://plantpick.app",  # Custom domain (if set up)
 ]
 
