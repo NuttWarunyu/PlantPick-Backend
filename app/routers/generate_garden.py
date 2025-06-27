@@ -107,11 +107,12 @@ async def generate_garden(
                 return JSONResponse(status_code=500, content={"error": f"Redis update error: {str(e)}"})
 
             try:
-                new_request = GardenRequest(
+                new_request = GenerationHistory(  # เปลี่ยนจาก GardenRequest
                     ip=user_ip,
                     prompt=prompt,
                     image_url=correct_url,
                     created_at=datetime.now(),
+                    ddim_steps=10,
                     user_agent=user_agent
                 )
                 db.add(new_request)
@@ -124,7 +125,7 @@ async def generate_garden(
                 "status": "success",
                 "result_url": correct_url,
                 "remaining": total_limit - (daily_used + 1),
-                "request_id": new_request.id
+                "history_id": new_request.history_id  # เปลี่ยนจาก request_id
             }
 
         elif poll["status"] == "failed":
@@ -173,11 +174,20 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
             "bom_id": bom.bom_id
         })
 
-    # Update total_cost to GardenRequest if available
-    request_record = db.query(GardenRequest).join(GenerationHistory, GardenRequest.image_url == GenerationHistory.image_url).filter(GenerationHistory.history_id == req.history_id).first()
-    if request_record:
-        request_record.total_cost = total_cost
+    # Create or update GardenRequest
+    garden_request = db.query(GardenRequest).filter(GardenRequest.history_id == req.history_id).first()
+    if not garden_request:
+        garden_request = GardenRequest(
+            history_id=req.history_id,
+            budget=req.budget,
+            location="Unknown",
+            created_at=datetime.now()
+        )
+        db.add(garden_request)
         db.commit()
+
+    garden_request.total_cost = total_cost
+    db.commit()
 
     return {
         "status": "success",
