@@ -9,6 +9,7 @@ from app.database import SessionLocal, UsageLimit, GenerationHistory, BOMDetail,
 from supabase import create_client, Client
 from .analyze_bom import analyze_bom, analyze_bom_from_image, BOMItem
 from pydantic import BaseModel
+import re
 
 router = APIRouter()
 
@@ -107,7 +108,7 @@ async def generate_garden(
                 return JSONResponse(status_code=500, content={"error": f"Redis update error: {str(e)}"})
 
             try:
-                new_request = GenerationHistory(  # เปลี่ยนจาก GardenRequest
+                new_request = GenerationHistory(
                     ip=user_ip,
                     prompt=prompt,
                     image_url=correct_url,
@@ -125,7 +126,7 @@ async def generate_garden(
                 "status": "success",
                 "result_url": correct_url,
                 "remaining": total_limit - (daily_used + 1),
-                "history_id": new_request.history_id  # เปลี่ยนจาก request_id
+                "history_id": new_request.history_id
             }
 
         elif poll["status"] == "failed":
@@ -150,6 +151,8 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
         bom_items = analyze_bom_from_image(req.history_id, history.image_url, db, budget=req.budget)
     except ValueError as e:
         return JSONResponse(status_code=500, content={"error": f"BOM analysis failed: {str(e)}"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Unexpected error in BOM analysis: {str(e)}"})
 
     bom_details = []
     total_cost = 0

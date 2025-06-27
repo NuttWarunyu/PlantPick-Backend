@@ -18,7 +18,12 @@ class BOMItem(BaseModel):
     affiliate_link: str
 
 def clean_openai_response(raw_response: str) -> str:
-    return re.sub(r"```(?:json)?|```", "", raw_response).strip()
+    cleaned = re.sub(r"```(?:json)?|```", "", raw_response).strip()
+    if not cleaned.startswith('['):
+        cleaned = '[' + cleaned
+    if not cleaned.endswith(']'):
+        cleaned = cleaned.rstrip(',') + ']'
+    return cleaned
 
 def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
@@ -39,7 +44,7 @@ def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
                 )
             }
         ],
-        max_tokens=400
+        max_tokens=300
     )
 
     try:
@@ -59,8 +64,12 @@ def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
             )
             for item in bom_data
         ]
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON Decode Error parsing BOM from prompt: {str(e)}")
+        print(f"📄 Raw response:\n{raw_response}")
+        return default_bom_fallback()
     except Exception as e:
-        print(f"❌ Error parsing BOM from prompt: {str(e)}")
+        print(f"❌ General Error parsing BOM from prompt: {str(e)}")
         print(f"📄 Raw response:\n{raw_response}")
         return default_bom_fallback()
 
@@ -108,6 +117,11 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
         raw_response = response.choices[0].message.content
         print("🧠 Raw response from OpenAI (image prompt):\n", raw_response)
         raw_response = clean_openai_response(raw_response)
+        # ตรวจสอบและแก้ไข JSON ที่ไม่สมบูรณ์
+        if not raw_response.startswith('['):
+            raw_response = '[' + raw_response
+        if not raw_response.endswith(']'):
+            raw_response = raw_response.rstrip(',') + ']'
         bom_data = json.loads(raw_response)
 
         if not isinstance(bom_data, list):
@@ -136,11 +150,11 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
         if budget:
             print("🔁 Falling back to budget-based analysis...")
             return analyze_bom_from_budget(budget)
-        return default_bom_fallback()
+        return default_bom_fallback(budget)
     except Exception as e:
         print(f"❌ General Error parsing BOM from image: {str(e)}")
         print(f"📄 Raw response:\n{raw_response}")
-        return default_bom_fallback()
+        return default_bom_fallback(budget)
 
 def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
     MATERIAL_CATALOG = [
