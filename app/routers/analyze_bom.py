@@ -155,27 +155,40 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
     ]
 
     catalog_str = "\n".join(
-        [f"{item['material_name']} ({item['unit']}) - {item['unit_price']} บาท" for item in MATERIAL_CATALOG]
+        [f"- {item['material_name']} (หน่วย: {item['unit']}, ราคาเฉลี่ยต่อหน่วย: {item['unit_price']} บาท)" for item in MATERIAL_CATALOG]
     )
 
     prompt = f"""
-คุณเป็นนักจัดสวน ลูกค้าต้องการจัดสวนโดยใช้งบประมาณไม่เกิน {budget} บาท
-วัสดุที่ใช้ได้มีตามนี้:
+        คุณเป็นนักออกแบบสวนที่เชี่ยวชาญ
 
-{catalog_str}
+        ลูกค้าต้องการจัดสวนโดยใช้งบประมาณไม่เกิน {budget} บาท กรุณาแนะนำวัสดุและอุปกรณ์ที่จำเป็น โดยเลือกจากวัสดุที่กำหนดไว้ด้านล่าง และคำนวณราคาโดยรวมทั้งหมดต้องไม่เกินงบประมาณที่ให้
 
-ช่วยเลือกวัสดุที่เหมาะสม พร้อมจำนวน และราคาคร่าวๆ (estimated_cost) โดยตอบกลับเป็น JSON array เท่านั้น เช่น:
+        **วัสดุที่เลือกได้:**
+        {catalog_str}
 
-[
-  {{
-    "material_name": "สนามหญ้า",
-    "quantity": 50,
-    "estimated_cost": 4500,
-    "affiliate_link": "https://example.com/lawn"
-  }}
-]
-ตอบเป็น JSON array อย่างเดียว ห้ามมีคำอธิบายหรือ markdown
-"""
+        **รูปแบบผลลัพธ์ที่ต้องการ:**
+        - แสดงชื่อวัสดุเป็นภาษาไทย
+        - ระบุจำนวน (`quantity`) และหน่วยที่เหมาะสม เช่น "ต้น", "ถุง", "ตารางเมตร"
+        - ระบุ `estimated_cost` เป็นจำนวนเงินบาท (จำนวนเต็มหรือทศนิยมไม่เกิน 2 ตำแหน่ง)
+        - ระบุลิงก์สินค้าใน `affiliate_link`
+        - ส่งกลับเป็น JSON array เท่านั้น พร้อมฟิลด์ `"total_estimated_cost"` ที่เป็นผลรวมของราคาทั้งหมด
+        - ห้ามมีข้อความอธิบายอื่นใดนอกเหนือจาก JSON
+
+        **ตัวอย่าง:**
+        ```json
+        [
+        {{
+            "material_name": "ไม้ประธาน",
+            "quantity": 2,
+            "unit": "ต้น",
+            "estimated_cost": 30000,
+            "affiliate_link": "https://example.com/tree"
+        }},
+        ...
+        ],
+        "total_estimated_cost": 98950
+        ตอบเป็น JSON array อย่างเดียว ห้ามมีคำอธิบายหรือ markdown
+        """
 
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     response = client.chat.completions.create(
@@ -188,7 +201,14 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
         raw_response = response.choices[0].message.content
         print("🧠 Raw response from OpenAI (budget fallback):\n", raw_response)
         raw_response = clean_openai_response(raw_response)
-        bom_data = json.loads(raw_response)
+
+        # รองรับทั้งแบบ array หรือ array + summary object
+        # แยก total ออก หากอยู่ท้าย
+        total_match = re.search(r'"total_estimated_cost"\s*:\s*(\d+(\.\d+)?)', raw_response)
+        total_cost = float(total_match.group(1)) if total_match else 0.0
+        raw_json = re.sub(r',?\s*"total_estimated_cost"\s*:\s*\d+(\.\d+)?', "", raw_response)
+
+        bom_data = json.loads(raw_json)
         if not isinstance(bom_data, list):
             bom_data = [bom_data]
 
@@ -203,7 +223,7 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
         ]
     except Exception as e:
         print(f"❌ Error parsing BOM from budget fallback: {str(e)}")
-        return default_bom_fallback()
+    return default_bom_fallback()
 
 def default_bom_fallback() -> List[BOMItem]:
     return [

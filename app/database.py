@@ -45,9 +45,10 @@ class BOMDetail(Base):
     __tablename__ = "bom_details"
     bom_id = Column(Integer, primary_key=True)
     history_id = Column(Integer, ForeignKey("generation_history.history_id"), nullable=False)
-    material_name = Column(String, nullable=False)
-    quantity = Column(Integer, nullable=False)
-    estimated_cost = Column(DECIMAL(10, 2), nullable=False)
+    material_name = Column(String, nullable=False)     # เช่น "ต้นไม้"
+    unit = Column(String, nullable=False)              # เช่น "ต้น"
+    quantity = Column(DECIMAL(10, 2), nullable=False)  # เช่น 5.00
+    estimated_cost = Column(DECIMAL(10, 2), nullable=False)  # บาท
     affiliate_link = Column(String)
     created_at = Column(TIMESTAMP, nullable=False)
 
@@ -61,6 +62,7 @@ class GardenRequest(Base):
     status = Column(String, default="pending")
     created_at = Column(TIMESTAMP, nullable=False)
     fee_charged = Column(DECIMAL(10, 2), default=0.00)
+    total_cost = Column(DECIMAL(10, 2), nullable=True)
 
 # สร้างตาราง (เพิ่มเงื่อนไขไม่สร้างซ้ำ)
 def init_db():
