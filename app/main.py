@@ -17,17 +17,15 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # CORS settings for Railway
 origins = [
     "http://localhost:5173",  # Local development
-    "https://plantpick-backend.up.railway.app",  # Replace with your Railway domain
-    "https://plantpick.app/garden-budget-ideas", # Gen Image Page
-    "https://plantpick.app",  # Custom domain (if set up)
+    "https://plantpick.app",  # Frontend production domain
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],  # จำกัด methods ที่ใช้จริง
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],  # จำกัด headers ที่ใช้จริง
 )
 
 # Include Routers
@@ -37,7 +35,6 @@ app.include_router(identify.router, tags=["Identify"])
 app.include_router(search.router, tags=["Search"])
 app.include_router(generate_garden.router, prefix="/garden", tags=["Garden"])  # Add prefix
 app.include_router(garden_controlnet_test.router, prefix="/garden-test")
-
 
 if __name__ == "__main__":
     print("🚀 Railway is running `main.py`!")

@@ -9,7 +9,11 @@ from app.database import SessionLocal, UsageLimit, GenerationHistory, BOMDetail,
 from supabase import create_client, Client
 from .analyze_bom import analyze_bom, analyze_bom_from_image, BOMItem
 from pydantic import BaseModel
-import re
+import logging
+
+# ตั้งค่า logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -49,7 +53,7 @@ async def generate_garden(
     timestamp = datetime.now().strftime("%H:%M:%S")
     user_ip = request.client.host
     user_agent = request.headers.get("user-agent")
-    print(f"[{timestamp}] 🔍 New request from {user_ip} - Prompt: {prompt}")
+    logger.info(f"[{timestamp}] 🔍 New request from {user_ip} - Prompt: {prompt}")
 
     key = f"ip:{user_ip}:daily_limit"
     try:
@@ -149,48 +153,59 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
 
     try:
         bom_items = analyze_bom_from_image(req.history_id, history.image_url, db, budget=req.budget)
+        logger.info(f"BOM items generated: {bom_items}")
     except ValueError as e:
         return JSONResponse(status_code=500, content={"error": f"BOM analysis failed: {str(e)}"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Unexpected error in BOM analysis: {str(e)}"})
+        logger.error(f"Unexpected error in BOM analysis: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": f"Unexpected error: {str(e)}"})
 
     bom_details = []
     total_cost = 0
 
     for item in bom_items:
-        bom = BOMDetail(
-            history_id=req.history_id,
-            material_name=item.material_name,
-            quantity=item.quantity,
-            estimated_cost=item.estimated_cost,
-            affiliate_link=item.affiliate_link,
-            created_at=datetime.now()
-        )
-        db.add(bom)
-        db.commit()
-        total_cost += float(item.estimated_cost)
-        bom_details.append({
-            "material_name": bom.material_name,
-            "quantity": bom.quantity,
-            "estimated_cost": bom.estimated_cost,
-            "affiliate_link": bom.affiliate_link,
-            "bom_id": bom.bom_id
-        })
+        try:
+            bom = BOMDetail(
+                history_id=req.history_id,
+                material_name=item.material_name,
+                quantity=item.quantity,
+                estimated_cost=item.estimated_cost,
+                affiliate_link=item.affiliate_link,
+                created_at=datetime.now()
+            )
+            db.add(bom)
+            db.flush()  # Flush เพื่อตรวจสอบ error ก่อน commit
+            bom_details.append({
+                "material_name": bom.material_name,
+                "quantity": bom.quantity,
+                "estimated_cost": bom.estimated_cost,
+                "affiliate_link": bom.affiliate_link,
+                "bom_id": bom.bom_id
+            })
+            total_cost += float(item.estimated_cost)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving BOMDetail: {str(e)}, Item: {vars(item)}")
+            return JSONResponse(status_code=500, content={"error": f"Failed to save BOM detail: {str(e)}"})
 
-    # Create or update GardenRequest
-    garden_request = db.query(GardenRequest).filter(GardenRequest.history_id == req.history_id).first()
-    if not garden_request:
-        garden_request = GardenRequest(
-            history_id=req.history_id,
-            budget=req.budget,
-            location="Unknown",
-            created_at=datetime.now()
-        )
-        db.add(garden_request)
+    try:
+        # Create or update GardenRequest
+        garden_request = db.query(GardenRequest).filter(GardenRequest.history_id == req.history_id).first()
+        if not garden_request:
+            garden_request = GardenRequest(
+                history_id=req.history_id,
+                budget=req.budget,
+                location="Unknown",
+                created_at=datetime.now()
+            )
+            db.add(garden_request)
+        garden_request.total_cost = total_cost
         db.commit()
-
-    garden_request.total_cost = total_cost
-    db.commit()
+        logger.info(f"GardenRequest updated with total_cost: {total_cost}")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating GardenRequest: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": f"Database error: {str(e)}"})
 
     return {
         "status": "success",
