@@ -9,12 +9,16 @@ from PIL import Image
 import io
 import base64
 import json
+import re
 
 class BOMItem(BaseModel):
     material_name: str
     quantity: int
     estimated_cost: float
     affiliate_link: str
+
+def clean_openai_response(raw_response: str) -> str:
+    return re.sub(r"```(?:json)?|```", "", raw_response).strip()
 
 def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
@@ -27,14 +31,22 @@ def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
         messages=[
             {
                 "role": "user",
-                "content": f"Based on this garden design prompt: '{prompt}', suggest a list of materials with material_name, quantity, estimated_cost (in USD, max 2 decimal places), and affiliate_link. Use only these materials: trees, flowers, pathways, fountains, stones, planting soil, lawn. Return in JSON format."
+                "content": (
+                    f"Based on this garden design prompt: '{prompt}', suggest a list of materials "
+                    f"with material_name, quantity, estimated_cost (in USD, max 2 decimal places), and affiliate_link. "
+                    f"Use only these materials: trees, flowers, pathways, fountains, stones, planting soil, lawn. "
+                    f"Return ONLY a valid JSON array, no explanation, no markdown."
+                )
             }
         ],
-        max_tokens=300
+        max_tokens=400
     )
 
     try:
-        bom_data = json.loads(response.choices[0].message.content)
+        raw_response = response.choices[0].message.content
+        print("🧠 Raw response from OpenAI (text prompt):\n", raw_response)
+        raw_response = clean_openai_response(raw_response)
+        bom_data = json.loads(raw_response)
         if not isinstance(bom_data, list):
             bom_data = [bom_data]
 
@@ -48,7 +60,8 @@ def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
             for item in bom_data
         ]
     except Exception as e:
-        print(f"Error parsing BOM from prompt: {str(e)}")
+        print(f"❌ Error parsing BOM from prompt: {str(e)}")
+        print(f"📄 Raw response:\n{raw_response}")
         return default_bom_fallback()
 
 def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget: Optional[float] = None) -> List[BOMItem]:
@@ -68,7 +81,12 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
     image_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    prompt = "Analyze this garden image and suggest a list of materials with material_name, quantity, estimated_cost (in USD, max 2 decimal places), and affiliate_link. Use only these materials: trees, flowers, pathways, fountains, stones, planting soil, lawn. Return in JSON format."
+    prompt = (
+        "Analyze this garden image and suggest a list of materials with material_name, quantity, "
+        "estimated_cost (in USD, max 2 decimal places), and affiliate_link. "
+        "Use only these materials: trees, flowers, pathways, fountains, stones, planting soil, lawn. "
+        "Return ONLY a valid JSON array, no explanation, no markdown."
+    )
     if budget:
         prompt += f" Ensure the total estimated_cost does not exceed {budget} USD."
 
@@ -83,22 +101,24 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
                 ]
             }
         ],
-        max_tokens=300
+        max_tokens=400
     )
 
     try:
         raw_response = response.choices[0].message.content
-        print(f"Raw response from OpenAI: {raw_response}")  # Log raw response
+        print("🧠 Raw response from OpenAI (image prompt):\n", raw_response)
+        raw_response = clean_openai_response(raw_response)
         bom_data = json.loads(raw_response)
+
         if not isinstance(bom_data, list):
             bom_data = [bom_data]
 
-        # ตรวจสอบว่า estimated_cost เกิน budget หรือไม่ (ถ้ามี)
-        if budget:
-            total_cost = sum(item.get("estimated_cost", 0.0) for item in bom_data)
-            if total_cost > budget:
-                print(f"Warning: Total estimated cost ({total_cost}) exceeds budget ({budget}). Adjusting...")
-                return analyze_bom_from_budget(budget)  # ใช้ budget-based fallback
+        total_cost = sum(item.get("estimated_cost", 0.0) for item in bom_data)
+        print(f"💵 Total estimated cost: {total_cost} USD | Budget: {budget if budget else 'None'}")
+
+        if budget and total_cost > budget:
+            print("⚠️ Cost exceeds budget. Falling back to budget-based suggestion.")
+            return analyze_bom_from_budget(budget)
 
         return [
             BOMItem(
@@ -109,14 +129,17 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
             )
             for item in bom_data
         ]
+
     except json.JSONDecodeError as e:
-        print(f"JSON Decode Error parsing BOM from image: {str(e)} - Raw response: {raw_response}")
+        print(f"❌ JSON Decode Error parsing BOM from image: {str(e)}")
+        print(f"📄 Raw response:\n{raw_response}")
         if budget:
-            print("Falling back to budget-based analysis...")
+            print("🔁 Falling back to budget-based analysis...")
             return analyze_bom_from_budget(budget)
         return default_bom_fallback()
     except Exception as e:
-        print(f"Error parsing BOM from image: {str(e)} - Raw response: {raw_response}")
+        print(f"❌ General Error parsing BOM from image: {str(e)}")
+        print(f"📄 Raw response:\n{raw_response}")
         return default_bom_fallback()
 
 def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
@@ -151,6 +174,7 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
     "affiliate_link": "https://example.com/lawn"
   }}
 ]
+ตอบเป็น JSON array อย่างเดียว ห้ามมีคำอธิบายหรือ markdown
 """
 
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -161,7 +185,10 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
     )
 
     try:
-        bom_data = json.loads(response.choices[0].message.content)
+        raw_response = response.choices[0].message.content
+        print("🧠 Raw response from OpenAI (budget fallback):\n", raw_response)
+        raw_response = clean_openai_response(raw_response)
+        bom_data = json.loads(raw_response)
         if not isinstance(bom_data, list):
             bom_data = [bom_data]
 
@@ -175,7 +202,7 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
             for item in bom_data
         ]
     except Exception as e:
-        print(f"Error parsing BOM from budget: {str(e)}")
+        print(f"❌ Error parsing BOM from budget fallback: {str(e)}")
         return default_bom_fallback()
 
 def default_bom_fallback() -> List[BOMItem]:
