@@ -46,7 +46,6 @@ class BOMDetail(Base):
     bom_id = Column(Integer, primary_key=True)
     history_id = Column(Integer, ForeignKey("generation_history.history_id"), nullable=False)
     material_name = Column(String, nullable=False)     # เช่น "ต้นไม้"
-    unit = Column(String, nullable=False)              # เช่น "ต้น"
     quantity = Column(DECIMAL(10, 2), nullable=False)  # เช่น 5.00
     estimated_cost = Column(DECIMAL(10, 2), nullable=False)  # บาท
     affiliate_link = Column(String)
