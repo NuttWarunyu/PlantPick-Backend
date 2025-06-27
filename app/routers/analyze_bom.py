@@ -158,19 +158,17 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
 
 def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
     MATERIAL_CATALOG = [
-        {"material_name": "ทางเดิน", "unit": "งาน", "unit_price": 30000},
-        {"material_name": "ไม้ประธาน", "unit": "ต้น", "unit_price": 15000},
-        {"material_name": "ต้นพุ่ม", "unit": "ต้น", "unit_price": 250},
-        {"material_name": "ไม้ดอก", "unit": "ต้น", "unit_price": 120},
-        {"material_name": "สนามหญ้า", "unit": "ตร.ม.", "unit_price": 90},
-        {"material_name": "หินตกแต่ง", "unit": "ถุง", "unit_price": 80},
-        {"material_name": "น้ำพุ", "unit": "ชุด", "unit_price": 20000},
-        {"material_name": "วัสดุปลูก", "unit": "ถุง", "unit_price": 150},
-    ]
+    {"material_name": "ทางเดิน", "unit_price": 30000},
+    {"material_name": "ไม้ประธาน", "unit_price": 15000},
+    {"material_name": "ต้นพุ่ม", "unit_price": 250},
+    {"material_name": "ไม้ดอก", "unit_price": 120},
+    {"material_name": "สนามหญ้า", "unit_price": 90},
+    {"material_name": "หินตกแต่ง", "unit_price": 80},
+    {"material_name": "น้ำพุ", "unit_price": 20000},
+    {"material_name": "วัสดุปลูก", "unit_price": 150},
+]
 
-    catalog_str = "\n".join(
-        [f"- {item['material_name']} (หน่วย: {item['unit']}, ราคาเฉลี่ยต่อหน่วย: {item['unit_price']} บาท)" for item in MATERIAL_CATALOG]
-    )
+    catalog_str = "\n".join([f"- {item['material_name']} (ราคาเฉลี่ย: {item['unit_price']} บาท)" for item in MATERIAL_CATALOG])
 
     prompt = f"""
         คุณเป็นนักออกแบบสวนที่เชี่ยวชาญ
@@ -182,8 +180,7 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
 
         **รูปแบบผลลัพธ์ที่ต้องการ:**
         - แสดงชื่อวัสดุเป็นภาษาไทย
-        - ระบุจำนวน (`quantity`) และหน่วยที่เหมาะสม เช่น "ต้น", "ถุง", "ตารางเมตร"
-        - ระบุ `estimated_cost` เป็นจำนวนเงินบาท (จำนวนเต็มหรือทศนิยมไม่เกิน 2 ตำแหน่ง)
+        - ระบุจำนวน (`quantity`) และ `estimated_cost` เป็นจำนวนเงินบาท (จำนวนเต็มหรือทศนิยมไม่เกิน 2 ตำแหน่ง)        
         - ระบุลิงก์สินค้าใน `affiliate_link`
         - ส่งกลับเป็น JSON array เท่านั้น พร้อมฟิลด์ `"total_estimated_cost"` ที่เป็นผลรวมของราคาทั้งหมด
         - ห้ามมีข้อความอธิบายอื่นใดนอกเหนือจาก JSON
@@ -194,7 +191,6 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
         {{
             "material_name": "ไม้ประธาน",
             "quantity": 2,
-            "unit": "ต้น",
             "estimated_cost": 30000,
             "affiliate_link": "https://example.com/tree"
         }},
@@ -216,8 +212,6 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
         print("🧠 Raw response from OpenAI (budget fallback):\n", raw_response)
         raw_response = clean_openai_response(raw_response)
 
-        # รองรับทั้งแบบ array หรือ array + summary object
-        # แยก total ออก หากอยู่ท้าย
         total_match = re.search(r'"total_estimated_cost"\s*:\s*(\d+(\.\d+)?)', raw_response)
         total_cost = float(total_match.group(1)) if total_match else 0.0
         raw_json = re.sub(r',?\s*"total_estimated_cost"\s*:\s*\d+(\.\d+)?', "", raw_response)
@@ -235,16 +229,16 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
             )
             for item in bom_data
         ]
+    except json.JSONDecodeError as e:
+            print(f"❌ JSON Decode Error parsing BOM from budget fallback: {str(e)}")
+            print(f"📄 Raw response:\n{raw_response}")
+            return default_bom_fallback(budget)
     except Exception as e:
-        print(f"❌ Error parsing BOM from budget fallback: {str(e)}")
-    return default_bom_fallback()
+            print(f"❌ General Error parsing BOM from budget fallback: {str(e)}")
+            print(f"📄 Raw response:\n{raw_response}")
+            return default_bom_fallback(budget)
 
-def default_bom_fallback() -> List[BOMItem]:
-    return [
-        BOMItem(
-            material_name="วัสดุปลูก",
-            quantity=10,
-            estimated_cost=5.00,
-            affiliate_link="https://shopee.co.th/dirt"
-        )
-    ]
+def default_bom_fallback(budget: Optional[float] = None) -> List[BOMItem]:
+    if budget:
+        return [BOMItem(material_name="วัสดุปลูก", quantity=10, estimated_cost=min(150.00, budget/10), affiliate_link="https://shopee.co.th/dirt")]
+    return [BOMItem(material_name="วัสดุปลูก", quantity=10, estimated_cost=150.00, affiliate_link="https://shopee.co.th/dirt")]
