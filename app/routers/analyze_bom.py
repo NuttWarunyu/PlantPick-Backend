@@ -37,10 +37,10 @@ def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
             {
                 "role": "user",
                 "content": (
-                    f"Based on this garden design prompt: '{prompt}', suggest a list of materials "
-                    f"with material_name, quantity, estimated_cost (in USD, max 2 decimal places), and affiliate_link. "
-                    f"Use only these materials: trees, flowers, pathways, fountains, stones, planting soil, lawn. "
-                    f"Return ONLY a valid JSON array, no explanation, no markdown."
+                    f"จากคำอธิบายการออกแบบสวนนี้: '{prompt}' กรุณาแนะนำรายการวัสดุ "
+                    f"ที่มี material_name, quantity, estimated_cost (ในหน่วยบาทไทย, ทศนิยมสูงสุด 2 ตำแหน่ง), และ affiliate_link. "
+                    f"ใช้เฉพาะวัสดุจากรายการที่กำหนดในตารางด้านล่างตามสไตล์สวนที่ระบุใน prompt. "
+                    f"ส่งกลับเป็น JSON array ที่ถูกต้องเท่านั้น ไม่ต้องมีคำอธิบายหรือ markdown."
                 )
             }
         ],
@@ -57,7 +57,7 @@ def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
 
         return [
             BOMItem(
-                material_name=item.get("material_name", "Unknown"),
+                material_name=item.get("material_name", "ไม่ระบุ"),
                 quantity=item.get("quantity", 1),
                 estimated_cost=float(item.get("estimated_cost", 0.0)),
                 affiliate_link=item.get("affiliate_link", "")
@@ -91,13 +91,13 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
 
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     prompt = (
-        "Analyze this garden image and suggest a list of materials with material_name, quantity, "
-        "estimated_cost (in USD, max 2 decimal places), and affiliate_link. "
-        "Use only these materials: trees, flowers, pathways, fountains, stones, planting soil, lawn. "
-        "Return ONLY a valid JSON array, no explanation, no markdown."
+        "วิเคราะห์ภาพสวนนี้และแนะนำรายการวัสดุที่มี material_name, quantity, "
+        "estimated_cost (ในหน่วยบาทไทย, ทศนิยมสูงสุด 2 ตำแหน่ง), และ affiliate_link. "
+        "ใช้เฉพาะวัสดุจากรายการที่กำหนดในตารางด้านล่างตามสไตล์สวนที่ระบุใน prompt. "
+        "ส่งกลับเป็น JSON array ที่ถูกต้องเท่านั้น ไม่ต้องมีคำอธิบายหรือ markdown."
     )
     if budget:
-        prompt += f" Ensure the total estimated_cost does not exceed {budget} USD."
+        prompt += f" ตรวจสอบให้แน่ใจว่าราคารวมทั้งหมดไม่เกิน {budget} บาท."
 
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -117,7 +117,6 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
         raw_response = response.choices[0].message.content
         print("🧠 Raw response from OpenAI (image prompt):\n", raw_response)
         raw_response = clean_openai_response(raw_response)
-        # ตรวจสอบและแก้ไข JSON ที่ไม่สมบูรณ์
         if not raw_response.startswith('['):
             raw_response = '[' + raw_response
         if not raw_response.endswith(']'):
@@ -128,15 +127,15 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
             bom_data = [bom_data]
 
         total_cost = sum(item.get("estimated_cost", 0.0) for item in bom_data)
-        print(f"💵 Total estimated cost: {total_cost} USD | Budget: {budget if budget else 'None'}")
+        print(f"💵 Total estimated cost: {total_cost} บาท | Budget: {budget if budget else 'None'}")
 
         if budget and total_cost > budget:
             print("⚠️ Cost exceeds budget. Falling back to budget-based suggestion.")
-            return analyze_bom_from_budget(budget)
+            return analyze_bom_from_budget(budget, prompt)  # ส่ง prompt ไปด้วย
 
         return [
             BOMItem(
-                material_name=item.get("material_name", "Unknown"),
+                material_name=item.get("material_name", "ไม่ระบุ"),
                 quantity=item.get("quantity", 1),
                 estimated_cost=float(item.get("estimated_cost", 0.0)),
                 affiliate_link=item.get("affiliate_link", "")
@@ -149,31 +148,62 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
         print(f"📄 Raw response:\n{raw_response}")
         if budget:
             print("🔁 Falling back to budget-based analysis...")
-            return analyze_bom_from_budget(budget)
+            return analyze_bom_from_budget(budget, prompt)  # ส่ง prompt ไปด้วย
         return default_bom_fallback(budget)
     except Exception as e:
         print(f"❌ General Error parsing BOM from image: {str(e)}")
         print(f"📄 Raw response:\n{raw_response}")
         return default_bom_fallback(budget)
 
-def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
-    MATERIAL_CATALOG = [
-    {"material_name": "ทางเดิน", "unit_price": 30000},
-    {"material_name": "ไม้ประธาน", "unit_price": 15000},
-    {"material_name": "ต้นพุ่ม", "unit_price": 250},
-    {"material_name": "ไม้ดอก", "unit_price": 120},
-    {"material_name": "สนามหญ้า", "unit_price": 90},
-    {"material_name": "หินตกแต่ง", "unit_price": 80},
-    {"material_name": "น้ำพุ", "unit_price": 20000},
-    {"material_name": "วัสดุปลูก", "unit_price": 150},
-]
+def analyze_bom_from_budget(budget: float, prompt: str = "") -> List[BOMItem]:
+    # รายการวัสดุตามตารางที่ล็อกไว้
+    MATERIAL_CATALOG = {
+        "english": [
+            {"material_name": "กุหลาบ", "unit_price": 1200},
+            {"material_name": "พยับหมอก", "unit_price": 600},
+            {"material_name": "เดซี่", "unit_price": 500},
+            {"material_name": "โรสแมรี่", "unit_price": 300},
+            {"material_name": "ต้นนีออน", "unit_price": 400},
+            {"material_name": "สนมังกร", "unit_price": 250},
+            {"material_name": "สนฉัตร", "unit_price": 250},
+        ],
+        "tropical": [
+            {"material_name": "ปาล์ม", "unit_price": 1500},
+            {"material_name": "บานบุรี", "unit_price": 800},
+            {"material_name": "เฮเลโคนีย์", "unit_price": 700},
+            {"material_name": "เฟินใบมะขาม", "unit_price": 350},
+            {"material_name": "เอื้องหมายนา", "unit_price": 600},
+            {"material_name": "ต้นคล้า", "unit_price": 400},
+            {"material_name": "ไอริช", "unit_price": 300},
+        ],
+        "japanese": [
+            {"material_name": "โบนไซ", "unit_price": 2000},
+            {"material_name": "ไผ่", "unit_price": 800},
+            {"material_name": "ต้นสนญี่ปุ่น", "unit_price": 1500},
+            {"material_name": "สนใบพาย", "unit_price": 400},
+            {"material_name": "มอส", "unit_price": 400},
+            {"material_name": "หลิวลู่ลม", "unit_price": 500},
+            {"material_name": "ไอริส", "unit_price": 600},
+        ]
+    }
 
-    catalog_str = "\n".join([f"- {item['material_name']} (ราคาเฉลี่ย: {item['unit_price']} บาท)" for item in MATERIAL_CATALOG])
+    # ตรวจสอบสไตล์จาก prompt โดยใช้ regex
+    style = "english"  # Default
+    if "tropical" in prompt.lower():
+        style = "tropical"
+    elif "japanese" in prompt.lower():
+        style = "japanese"
+    elif "english" in prompt.lower():
+        style = "english"
+
+    catalog = MATERIAL_CATALOG[style]
+
+    catalog_str = "\n".join([f"- {item['material_name']} (ราคาเฉลี่ย: {item['unit_price']} บาท)" for item in catalog])
 
     prompt = f"""
         คุณเป็นนักออกแบบสวนที่เชี่ยวชาญ
 
-        ลูกค้าต้องการจัดสวนโดยใช้งบประมาณไม่เกิน {budget} บาท กรุณาแนะนำวัสดุและอุปกรณ์ที่จำเป็น โดยเลือกจากวัสดุที่กำหนดไว้ด้านล่าง และคำนวณราคาโดยรวมทั้งหมดต้องไม่เกินงบประมาณที่ให้
+        ลูกค้าต้องการจัดสวนสไตล์ {style} โดยใช้งบประมาณไม่เกิน {budget} บาท กรุณาแนะนำวัสดุและอุปกรณ์ที่จำเป็น โดยเลือกจากวัสดุที่กำหนดไว้ด้านล่าง และคำนวณราคาโดยรวมทั้งหมดต้องไม่เกินงบประมาณที่ให้
 
         **วัสดุที่เลือกได้:**
         {catalog_str}
@@ -182,21 +212,21 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
         - แสดงชื่อวัสดุเป็นภาษาไทย
         - ระบุจำนวน (`quantity`) และ `estimated_cost` เป็นจำนวนเงินบาท (จำนวนเต็มหรือทศนิยมไม่เกิน 2 ตำแหน่ง)        
         - ระบุลิงก์สินค้าใน `affiliate_link`
-        - ส่งกลับเป็น JSON array เท่านั้น พร้อมฟิลด์ `"total_estimated_cost"` ที่เป็นผลรวมของราคาทั้งหมด
+        - ส่งกลับเป็น JSON array เท่านั้น พร้อมฟิลด์ `\"total_estimated_cost\"` ที่เป็นผลรวมของราคาทั้งหมด
         - ห้ามมีข้อความอธิบายอื่นใดนอกเหนือจาก JSON
 
         **ตัวอย่าง:**
         ```json
         [
-        {{
-            "material_name": "ไม้ประธาน",
-            "quantity": 2,
-            "estimated_cost": 30000,
-            "affiliate_link": "https://example.com/tree"
-        }},
-        ...
+            {{
+                \"material_name\": \"กุหลาบ\",
+                \"quantity\": 2,
+                \"estimated_cost\": 2400,
+                \"affiliate_link\": \"https://example.com/rose\"
+            }},
+            ...
         ],
-        "total_estimated_cost": 98950
+        \"total_estimated_cost\": 98950
         ตอบเป็น JSON array อย่างเดียว ห้ามมีคำอธิบายหรือ markdown
         """
 
@@ -222,7 +252,7 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
 
         return [
             BOMItem(
-                material_name=item.get("material_name", "Unknown"),
+                material_name=item.get("material_name", "ไม่ระบุ"),
                 quantity=item.get("quantity", 1),
                 estimated_cost=float(item.get("estimated_cost", 0.0)),
                 affiliate_link=item.get("affiliate_link", "")
@@ -240,5 +270,5 @@ def analyze_bom_from_budget(budget: float) -> List[BOMItem]:
 
 def default_bom_fallback(budget: Optional[float] = None) -> List[BOMItem]:
     if budget:
-        return [BOMItem(material_name="วัสดุปลูก", quantity=10, estimated_cost=min(150.00, budget/10), affiliate_link="https://shopee.co.th/dirt")]
-    return [BOMItem(material_name="วัสดุปลูก", quantity=10, estimated_cost=150.00, affiliate_link="https://shopee.co.th/dirt")]
+        return [BOMItem(material_name="ดินปลูก", quantity=10, estimated_cost=min(150.00, budget/10), affiliate_link="https://shopee.co.th/dirt")]
+    return [BOMItem(material_name="ดินปลูก", quantity=10, estimated_cost=150.00, affiliate_link="https://shopee.co.th/dirt")]
