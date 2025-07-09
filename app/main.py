@@ -37,6 +37,7 @@ app.include_router(generate_garden.router, prefix="/garden", tags=["Garden"])  #
 
 if __name__ == "__main__":
     print("🚀 Railway is running `main.py`!")
-    port = int(os.getenv("PORT", 8000))  # Ensure port is integer
+    port = int(os.getenv("PORT", 8000))  # Ensure port is integer # Ensure port is integer
     print(f"✅ Running on port: {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
+    # End

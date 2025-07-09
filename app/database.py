@@ -9,6 +9,7 @@ load_dotenv()
 
 # ตรวจสอบสภาพแวดล้อม (Environment)
 IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT") is not None
+# ตรวจสอบสภาพแวดล้อม (Environment)
 
 if IS_PRODUCTION:
     # เมื่อรันบน Railway ให้ใช้ DATABASE_URL (ที่อยู่ภายใน)
