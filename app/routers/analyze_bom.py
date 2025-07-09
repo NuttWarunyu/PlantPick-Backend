@@ -2,32 +2,35 @@ from typing import List, Optional, Dict
 from pydantic import BaseModel
 import os
 from openai import OpenAI
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
-from app.database import Material
+# === จุดแก้ไขที่ 1: Import โมเดลใหม่ทั้งหมด ===
+from app.database import Material, Vendor, Product
 import requests
 from PIL import Image
 import io
 import base64
 import json
 import re
-import random
 
 # ตั้งค่า OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Model สำหรับรับส่งข้อมูล BOM
+# === จุดแก้ไขที่ 2: อัปเดต Pydantic Model ให้รองรับข้อมูลร้านค้า ===
 class BOMItem(BaseModel):
     material_name: str
     quantity: int
     unit_type: str
+    vendor_name: str # เพิ่มชื่อร้านค้า
+    unit_price: float # เพิ่มราคาต่อหน่วย
     estimated_cost: float
-    affiliate_link: str
+    product_url: Optional[str] = None
 
-# --- ฟังก์ชัน get_materials_from_image เหมือนเดิม ---
+# --- ฟังก์ชันนี้เหมือนเดิม ---
 def get_materials_from_image(image_b64: str) -> List[str]:
     """ใช้ AI Vision เพื่อลิสต์ชื่อวัสดุที่เห็นในภาพ"""
     try:
+        # ... (โค้ดส่วนนี้เหมือนเดิม) ...
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -56,86 +59,103 @@ def get_materials_from_image(image_b64: str) -> List[str]:
         print(f"❌ Error getting materials from image: {e}")
         return []
 
-# --- จุดแก้ไขหลัก: เพิ่ม Debug Log เพื่อดูข้อมูลทั้งหมดใน DB ---
-def get_material_details_from_db(material_names: List[str], db: Session) -> List[Dict]:
-    """ค้นหารายละเอียดวัสดุจากฐานข้อมูลโดยใช้ชื่อภาษาอังกฤษ (Trimmed, Case-Insensitive & Plural-Insensitive)"""
+# --- ฟังก์ชันใหม่: ค้นหาสินค้าที่ราคาถูกที่สุดสำหรับแต่ละวัสดุ ---
+def find_cheapest_products_in_db(material_names: List[str], db: Session) -> List[Dict]:
+    """
+    สำหรับวัสดุแต่ละชนิดที่ AI หาเจอ, ค้นหาว่าร้านไหนขายถูกที่สุด
+    """
     if not material_names:
         return []
-        
-    # === DEBUGGING STEP: แสดงข้อมูลทั้งหมดในตาราง materials ===
-    try:
-        all_materials_in_db = db.query(Material.name_en).all()
-        # แปลงผลลัพธ์ [(name,), (name,)] ให้อยู่ในรูปแบบ [name, name]
-        available_names = [name[0] for name in all_materials_in_db if name[0] is not None]
-        print(f"🕵️‍♂️ AVAILABLE 'name_en' IN LOCAL DB: {available_names}")
-    except Exception as e:
-        print(f"❌ DEBUG ERROR: Could not fetch all material names from DB: {e}")
-    # ========================================================
 
-    # สร้างชุดคำค้นหาที่ครอบคลุมและสะอาด
     search_terms = set()
     for name in material_names:
-        clean_name = name.strip().lower() 
+        clean_name = name.strip().lower()
         search_terms.add(clean_name)
         if clean_name.endswith('s'):
             search_terms.add(clean_name[:-1])
-    
-    print(f"🧐 Searching for terms: {list(search_terms)}")
 
-    # สร้าง query ที่ค้นหาแบบไม่สนใจตัวพิมพ์และช่องว่าง
-    query = db.query(Material).filter(func.lower(func.trim(Material.name_en)).in_(search_terms))
-    found_materials = query.all()
-    
-    unique_materials = {mat.material_name: mat for mat in found_materials}.values()
+    # Query ที่ซับซ้อนขึ้นเพื่อหาราคาที่ถูกที่สุดของแต่ละ material
+    # เราจะใช้ Subquery เพื่อหา min_price ของแต่ละ material_id ก่อน
+    subquery = (
+        db.query(Product.material_id, func.min(Product.price_thb).label("min_price"))
+        .group_by(Product.material_id)
+        .subquery()
+    )
 
-    material_details = [
+    # จากนั้น JOIN เพื่อหาข้อมูลทั้งหมดของสินค้าที่ราคาตรงกับ min_price
+    query = (
+        db.query(Product, Vendor, Material)
+        .join(subquery, (Product.material_id == subquery.c.material_id) & (Product.price_thb == subquery.c.min_price))
+        .join(Vendor, Product.vendor_id == Vendor.id)
+        .join(Material, Product.material_id == Material.id)
+        .filter(func.lower(func.trim(Material.name_en)).in_(search_terms))
+    )
+    
+    results = query.all()
+    
+    cheapest_products = [
         {
-            "material_name": mat.material_name,
-            "unit_price_thb": float(mat.unit_price_thb),
-            "unit_type": mat.unit_type
+            "material_name": material.material_name,
+            "unit_price_thb": float(product.price_thb),
+            "unit_type": product.unit_type,
+            "vendor_name": vendor.vendor_name,
+            "product_url": product.product_url
         }
-        for mat in unique_materials
+        for product, vendor, material in results
     ]
-    print(f"🔍 Found materials in DB: {material_details}")
-    return material_details
+    
+    print(f"🛍️ Found cheapest products in DB: {cheapest_products}")
+    return cheapest_products
 
-# --- ฟังก์ชัน calculate_quantities เหมือนเดิม ---
-def calculate_quantities(materials: List[Dict], budget: float) -> List[Dict]:
-    if not materials:
+# --- ฟังก์ชันคำนวณจำนวน (ปรับปรุงเล็กน้อย) ---
+def calculate_quantities(products: List[Dict], budget: float) -> List[Dict]:
+    """คำนวณจำนวนที่เหมาะสมสำหรับแต่ละสินค้าภายใต้งบประมาณ"""
+    if not products:
         return []
 
-    sorted_materials = sorted(materials, key=lambda x: x['unit_price_thb'])
+    # เรียงจากถูกไปแพง
+    sorted_products = sorted(products, key=lambda x: x['unit_price_thb'])
     
-    bom_with_quantities = []
     remaining_budget = budget
     
-    for mat in sorted_materials:
-        if remaining_budget >= mat['unit_price_thb']:
-            mat['quantity'] = 1
-            remaining_budget -= mat['unit_price_thb']
+    # ให้ทุกอย่างมีอย่างน้อย 1 ชิ้นก่อน
+    for prod in sorted_products:
+        if remaining_budget >= prod['unit_price_thb']:
+            prod['quantity'] = 1
+            remaining_budget -= prod['unit_price_thb']
         else:
-            mat['quantity'] = 0
+            prod['quantity'] = 0
     
+    # วนลูปเพิ่มจำนวนของชิ้นที่ถูกที่สุด
     while remaining_budget > 0:
         added_something = False
-        for mat in sorted_materials:
-            if mat['quantity'] > 0 and remaining_budget >= mat['unit_price_thb']:
-                mat['quantity'] += 1
-                remaining_budget -= mat['unit_price_thb']
+        for prod in sorted_products:
+            if prod['quantity'] > 0 and remaining_budget >= prod['unit_price_thb']:
+                prod['quantity'] += 1
+                remaining_budget -= prod['unit_price_thb']
                 added_something = True
         if not added_something:
             break
             
-    for mat in sorted_materials:
-        mat['estimated_cost'] = mat['quantity'] * mat['unit_price_thb']
+    # คำนวณราคารวมของแต่ละรายการ
+    for prod in sorted_products:
+        prod['estimated_cost'] = prod['quantity'] * prod['unit_price_thb']
 
-    final_bom = [mat for mat in sorted_materials if mat['quantity'] > 0]
-    print(f"✅ Calculated quantities: {final_bom}")
+    final_bom = [prod for prod in sorted_products if prod['quantity'] > 0]
+    print(f"✅ Calculated quantities with vendors: {final_bom}")
     return final_bom
 
 
-# --- ฟังก์ชันหลัก analyze_bom_from_image เหมือนเดิม ---
+# --- ฟังก์ชันหลักที่ถูกเรียกจาก API (เขียนใหม่เกือบทั้งหมด) ---
 def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget: Optional[float] = 100000.0) -> List[BOMItem]:
+    """
+    Workflow ใหม่สำหรับ Marketplace:
+    1. โหลดรูป
+    2. AI วิเคราะห์วัสดุ
+    3. ค้นหาสินค้าที่ถูกที่สุดจากทุกร้าน
+    4. คำนวณจำนวนตามงบ
+    5. ประกอบร่างเป็น BOM สุดท้าย
+    """
     try:
         response = requests.get(image_url)
         response.raise_for_status()
@@ -145,28 +165,28 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
 
     material_names = get_materials_from_image(image_b64)
     if not material_names:
-        print("⚠️ AI could not identify any materials. Using fallback.")
         return default_bom_fallback(budget)
 
-    material_details = get_material_details_from_db(material_names, db)
-    if not material_details:
-        print("⚠️ No matching materials found in DB. Using fallback.")
+    cheapest_products = find_cheapest_products_in_db(material_names, db)
+    if not cheapest_products:
         return default_bom_fallback(budget)
 
-    final_bom_data = calculate_quantities(material_details, budget)
+    final_bom_data = calculate_quantities(cheapest_products, budget)
 
     return [
         BOMItem(
             material_name=item["material_name"],
             quantity=item["quantity"],
             unit_type=item["unit_type"],
+            vendor_name=item["vendor_name"],
+            unit_price=item["unit_price_thb"],
             estimated_cost=item["estimated_cost"],
-            affiliate_link=""
+            product_url=item.get("product_url")
         )
         for item in final_bom_data
     ]
 
-# --- ฟังก์ชัน default_bom_fallback เหมือนเดิม ---
+# --- ฟังก์ชันสำรอง (อัปเดตให้ตรงกับ Model ใหม่) ---
 def default_bom_fallback(budget: Optional[float] = None) -> List[BOMItem]:
     cost = 150.00
     if budget:
@@ -176,7 +196,9 @@ def default_bom_fallback(budget: Optional[float] = None) -> List[BOMItem]:
             material_name="ดินปลูก", 
             quantity=10, 
             unit_type="ถุง",
+            vendor_name="ร้านค้าแนะนำ",
+            unit_price=cost,
             estimated_cost=cost * 10, 
-            affiliate_link="https://shopee.co.th/dirt"
+            product_url="https://shopee.co.th/dirt"
         )
     ]

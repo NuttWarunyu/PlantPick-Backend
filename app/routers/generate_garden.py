@@ -5,9 +5,9 @@ import os, io, base64, time, requests
 from datetime import datetime
 import redis
 from sqlalchemy.orm import Session
-from app.database import SessionLocal, UsageLimit, GenerationHistory, BOMDetail, GardenRequest
+# === จุดแก้ไขที่ 1: Import โมเดลใหม่จาก database.py ===
+from app.database import SessionLocal, GenerationHistory, BOMDetail, GardenRequest, Material, Vendor, Product
 from supabase import create_client, Client
-# === จุดแก้ไข: ลบการ import ที่ไม่ใช้ออก และ import BOMItem จากไฟล์ใหม่ ===
 from .analyze_bom import analyze_bom_from_image, BOMItem
 from pydantic import BaseModel
 import logging
@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# (โค้ดส่วน Redis, Supabase, get_db, และฟังก์ชันจัดการรูปภาพ เหมือนเดิม)
+# ... (โค้ดส่วนนี้ไม่มีการเปลี่ยนแปลง)
 redis_url = os.getenv("REDIS_URL")
 if redis_url:
     redis_client = redis.from_url(redis_url)
@@ -42,6 +44,8 @@ def image_to_base64(img: Image.Image) -> str:
 
 def resize_image(img: Image.Image, size: int = 512) -> Image.Image:
     return img.resize((size, size), Image.Resampling.LANCZOS)
+# ... (จบส่วนที่ไม่มีการเปลี่ยนแปลง)
+
 
 @router.post("/generate-garden")
 async def generate_garden(
@@ -51,6 +55,7 @@ async def generate_garden(
     request: Request = None,
     db: Session = Depends(get_db)
 ):
+    # ฟังก์ชันนี้ทำงานเหมือนเดิม ไม่มีการเปลี่ยนแปลง
     timestamp = datetime.now().strftime("%H:%M:%S")
     user_ip = request.client.host
     user_agent = request.headers.get("user-agent")
@@ -141,75 +146,58 @@ async def generate_garden(
 
     return JSONResponse(status_code=504, content={"error": "Prediction timed out"})
 
+
 class BOMRequest(BaseModel):
     history_id: int
     budget: float
 
+# === จุดแก้ไขหลัก: ปรับปรุง Endpoint นี้ให้ทำงานกับข้อมูล Marketplace ===
 @router.post("/generate-bom")
 async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
-    timestamp = datetime.now().strftime("%H:%M:%S")
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == req.history_id).first()
     if not history:
         raise HTTPException(status_code=404, detail="History not found")
 
     try:
-        # การเรียกใช้ฟังก์ชันที่ Refactor แล้วยังคงเหมือนเดิม ซึ่งถูกต้องแล้ว
+        # การเรียกใช้ฟังก์ชันใหม่จาก analyze_bom.py
         bom_items = analyze_bom_from_image(req.history_id, history.image_url, db, budget=req.budget)
-        logger.info(f"BOM items generated: {bom_items}")
-    except ValueError as e:
-        return JSONResponse(status_code=500, content={"error": f"BOM analysis failed: {str(e)}"})
+        logger.info(f"Marketplace BOM items generated: {bom_items}")
     except Exception as e:
         logger.error(f"Unexpected error in BOM analysis: {str(e)}")
         return JSONResponse(status_code=500, content={"error": f"Unexpected error: {str(e)}"})
 
-    bom_details = []
-    total_cost = 0
+    # แปลงผลลัพธ์จาก Pydantic model เป็น dictionary เพื่อส่งกลับเป็น JSON
+    bom_details_for_frontend = [item.model_dump() for item in bom_items]
+    
+    # คำนวณราคารวม
+    total_cost = sum(item["estimated_cost"] for item in bom_details_for_frontend)
 
-    for item in bom_items:
-        try:
-            # === จุดแก้ไข: เพิ่ม unit_type เข้าไปในการตอบกลับ ===
-            # (หมายเหตุ: ตาราง bom_details ยังไม่มีคอลัมน์ unit_type เราจะเพิ่มทีหลัง)
-            # ตอนนี้เราจะส่งข้อมูลกลับไปให้ Frontend ก่อน
-            bom_details.append({
-                "material_name": item.material_name,
-                "quantity": item.quantity,
-                "unit_type": item.unit_type, # <-- เพิ่มฟิลด์ใหม่
-                "estimated_cost": item.estimated_cost,
-                "affiliate_link": item.affiliate_link,
-            })
-            total_cost += float(item.estimated_cost)
-            
-            # บันทึก BOM ลง DB (เหมือนเดิม)
+    # (Optional) บันทึก Log การสร้าง BOM ลงในตาราง bom_details (แบบง่าย)
+    # เพื่อให้เรามีประวัติว่ามีการขอ BOM เกิดขึ้น
+    try:
+        for item in bom_items:
             bom_db_entry = BOMDetail(
                 history_id=req.history_id,
-                material_name=item.material_name,
+                material_name=f"{item.material_name} (from {item.vendor_name})", # บันทึกชื่อของ+ร้าน
                 quantity=item.quantity,
                 estimated_cost=item.estimated_cost,
-                affiliate_link=item.affiliate_link,
+                affiliate_link=item.product_url or "",
                 created_at=datetime.now()
             )
             db.add(bom_db_entry)
-
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error processing BOM item: {str(e)}, Item: {vars(item)}")
-            return JSONResponse(status_code=500, content={"error": f"Failed to process BOM detail: {str(e)}"})
-    
-    # Commit การเปลี่ยนแปลงทั้งหมดครั้งเดียวหลังจบ loop
-    try:
         db.commit()
     except Exception as e:
         db.rollback()
-        logger.error(f"Error committing BOM details: {str(e)}")
-        return JSONResponse(status_code=500, content={"error": f"Database commit error: {str(e)}"})
-
+        logger.error(f"Could not save BOM history to bom_details table: {e}")
+        # ไม่ต้อง return error เพราะเป็นแค่การเก็บ log, ให้ทำงานต่อไปได้
 
     return {
         "status": "success",
         "total_cost": total_cost,
-        "bom_details": bom_details
+        "bom_details": bom_details_for_frontend # ส่งข้อมูลรูปแบบใหม่กลับไป
     }
 
+# (ฟังก์ชัน upload_image เหมือนเดิม)
 @router.post("/upload-image")
 async def upload_image(file: UploadFile = File(...)):
     try:
