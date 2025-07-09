@@ -95,6 +95,20 @@ class BOMDetail(Base):
     affiliate_link = Column(String)
     created_at = Column(TIMESTAMP, nullable=False)
 
+# === จุดแก้ไข: เพิ่มโมเดล GardenRequest กลับเข้ามา ===
+class GardenRequest(Base):
+    __tablename__ = "garden_requests"
+    request_id = Column(Integer, primary_key=True)
+    history_id = Column(Integer, ForeignKey("generation_history.history_id"), nullable=False)
+    budget = Column(DECIMAL(10, 2), nullable=False)
+    location = Column(String, nullable=False)
+    additional_details = Column(Text)
+    status = Column(String, default="pending")
+    created_at = Column(TIMESTAMP, nullable=False)
+    fee_charged = Column(DECIMAL(10, 2), default=0.00)
+    total_cost = Column(DECIMAL(10, 2), nullable=True)
+# ====================================================
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     print("Database tables checked/created.")
