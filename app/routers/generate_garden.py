@@ -7,7 +7,8 @@ import redis
 from sqlalchemy.orm import Session
 from app.database import SessionLocal, UsageLimit, GenerationHistory, BOMDetail, GardenRequest
 from supabase import create_client, Client
-from .analyze_bom import analyze_bom, analyze_bom_from_image, BOMItem
+# === จุดแก้ไข: ลบการ import ที่ไม่ใช้ออก และ import BOMItem จากไฟล์ใหม่ ===
+from .analyze_bom import analyze_bom_from_image, BOMItem
 from pydantic import BaseModel
 import logging
 
@@ -152,6 +153,7 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="History not found")
 
     try:
+        # การเรียกใช้ฟังก์ชันที่ Refactor แล้วยังคงเหมือนเดิม ซึ่งถูกต้องแล้ว
         bom_items = analyze_bom_from_image(req.history_id, history.image_url, db, budget=req.budget)
         logger.info(f"BOM items generated: {bom_items}")
     except ValueError as e:
@@ -165,7 +167,20 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
 
     for item in bom_items:
         try:
-            bom = BOMDetail(
+            # === จุดแก้ไข: เพิ่ม unit_type เข้าไปในการตอบกลับ ===
+            # (หมายเหตุ: ตาราง bom_details ยังไม่มีคอลัมน์ unit_type เราจะเพิ่มทีหลัง)
+            # ตอนนี้เราจะส่งข้อมูลกลับไปให้ Frontend ก่อน
+            bom_details.append({
+                "material_name": item.material_name,
+                "quantity": item.quantity,
+                "unit_type": item.unit_type, # <-- เพิ่มฟิลด์ใหม่
+                "estimated_cost": item.estimated_cost,
+                "affiliate_link": item.affiliate_link,
+            })
+            total_cost += float(item.estimated_cost)
+            
+            # บันทึก BOM ลง DB (เหมือนเดิม)
+            bom_db_entry = BOMDetail(
                 history_id=req.history_id,
                 material_name=item.material_name,
                 quantity=item.quantity,
@@ -173,39 +188,21 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
                 affiliate_link=item.affiliate_link,
                 created_at=datetime.now()
             )
-            db.add(bom)
-            db.flush()  # Flush เพื่อตรวจสอบ error ก่อน commit
-            bom_details.append({
-                "material_name": bom.material_name,
-                "quantity": bom.quantity,
-                "estimated_cost": bom.estimated_cost,
-                "affiliate_link": bom.affiliate_link,
-                "bom_id": bom.bom_id
-            })
-            total_cost += float(item.estimated_cost)
+            db.add(bom_db_entry)
+
         except Exception as e:
             db.rollback()
-            logger.error(f"Error saving BOMDetail: {str(e)}, Item: {vars(item)}")
-            return JSONResponse(status_code=500, content={"error": f"Failed to save BOM detail: {str(e)}"})
-
+            logger.error(f"Error processing BOM item: {str(e)}, Item: {vars(item)}")
+            return JSONResponse(status_code=500, content={"error": f"Failed to process BOM detail: {str(e)}"})
+    
+    # Commit การเปลี่ยนแปลงทั้งหมดครั้งเดียวหลังจบ loop
     try:
-        # Create or update GardenRequest
-        garden_request = db.query(GardenRequest).filter(GardenRequest.history_id == req.history_id).first()
-        if not garden_request:
-            garden_request = GardenRequest(
-                history_id=req.history_id,
-                budget=req.budget,
-                location="Unknown",
-                created_at=datetime.now()
-            )
-            db.add(garden_request)
-        garden_request.total_cost = total_cost
         db.commit()
-        logger.info(f"GardenRequest updated with total_cost: {total_cost}")
     except Exception as e:
         db.rollback()
-        logger.error(f"Error updating GardenRequest: {str(e)}")
-        return JSONResponse(status_code=500, content={"error": f"Database error: {str(e)}"})
+        logger.error(f"Error committing BOM details: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": f"Database commit error: {str(e)}"})
+
 
     return {
         "status": "success",

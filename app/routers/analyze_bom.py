@@ -1,274 +1,182 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pydantic import BaseModel
 import os
 from openai import OpenAI
 from sqlalchemy.orm import Session
-from app.database import BOMDetail, GenerationHistory
+from sqlalchemy import func
+from app.database import Material
 import requests
 from PIL import Image
 import io
 import base64
 import json
 import re
+import random
 
+# ตั้งค่า OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Model สำหรับรับส่งข้อมูล BOM
 class BOMItem(BaseModel):
     material_name: str
     quantity: int
+    unit_type: str
     estimated_cost: float
     affiliate_link: str
 
-def clean_openai_response(raw_response: str) -> str:
-    cleaned = re.sub(r"```(?:json)?|```", "", raw_response).strip()
-    if not cleaned.startswith('['):
-        cleaned = '[' + cleaned
-    if not cleaned.endswith(']'):
-        cleaned = cleaned.rstrip(',') + ']'
-    return cleaned
-
-def analyze_bom(history_id: int, prompt: str, db: Session) -> List[BOMItem]:
-    history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
-    if not history:
-        raise ValueError("History not found")
-
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"จากคำอธิบายการออกแบบสวนนี้: '{prompt}' กรุณาแนะนำรายการวัสดุ "
-                    f"ที่มี material_name, quantity, estimated_cost (ในหน่วยบาทไทย, ทศนิยมสูงสุด 2 ตำแหน่ง), และ affiliate_link. "
-                    f"ใช้เฉพาะวัสดุจากรายการที่กำหนดในตารางด้านล่างตามสไตล์สวนที่ระบุใน prompt. "
-                    f"ส่งกลับเป็น JSON array ที่ถูกต้องเท่านั้น ไม่ต้องมีคำอธิบายหรือ markdown."
-                )
-            }
-        ],
-        max_tokens=300
-    )
-
+# --- ฟังก์ชัน get_materials_from_image เหมือนเดิม ---
+def get_materials_from_image(image_b64: str) -> List[str]:
+    """ใช้ AI Vision เพื่อลิสต์ชื่อวัสดุที่เห็นในภาพ"""
     try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Analyze this garden image and list all visible materials like plants, stones, wood, etc. Return only a clean JSON array of strings. For example: [\"Palm Tree\", \"Paving Stone\", \"Wooden Deck\"]. Do not include any explanation."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{image_b64}"}
+                        }
+                    ]
+                }
+            ],
+            max_tokens=200
+        )
         raw_response = response.choices[0].message.content
-        print("🧠 Raw response from OpenAI (text prompt):\n", raw_response)
-        raw_response = clean_openai_response(raw_response)
-        bom_data = json.loads(raw_response)
-        if not isinstance(bom_data, list):
-            bom_data = [bom_data]
-
-        return [
-            BOMItem(
-                material_name=item.get("material_name", "ไม่ระบุ"),
-                quantity=item.get("quantity", 1),
-                estimated_cost=float(item.get("estimated_cost", 0.0)),
-                affiliate_link=item.get("affiliate_link", "")
-            )
-            for item in bom_data
-        ]
-    except json.JSONDecodeError as e:
-        print(f"❌ JSON Decode Error parsing BOM from prompt: {str(e)}")
-        print(f"📄 Raw response:\n{raw_response}")
-        return default_bom_fallback()
+        cleaned_response = re.sub(r"```(?:json)?|```", "", raw_response).strip()
+        material_list = json.loads(cleaned_response)
+        print(f"🧠 AI identified materials: {material_list}")
+        return [str(item) for item in material_list]
     except Exception as e:
-        print(f"❌ General Error parsing BOM from prompt: {str(e)}")
-        print(f"📄 Raw response:\n{raw_response}")
-        return default_bom_fallback()
+        print(f"❌ Error getting materials from image: {e}")
+        return []
 
-def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget: Optional[float] = None) -> List[BOMItem]:
-    history = db.query(GenerationHistory).filter(GenerationHistory.history_id == history_id).first()
-    if not history:
-        raise ValueError("History not found")
+# --- จุดแก้ไขหลัก: เพิ่ม Debug Log เพื่อดูข้อมูลทั้งหมดใน DB ---
+def get_material_details_from_db(material_names: List[str], db: Session) -> List[Dict]:
+    """ค้นหารายละเอียดวัสดุจากฐานข้อมูลโดยใช้ชื่อภาษาอังกฤษ (Trimmed, Case-Insensitive & Plural-Insensitive)"""
+    if not material_names:
+        return []
+        
+    # === DEBUGGING STEP: แสดงข้อมูลทั้งหมดในตาราง materials ===
+    try:
+        all_materials_in_db = db.query(Material.name_en).all()
+        # แปลงผลลัพธ์ [(name,), (name,)] ให้อยู่ในรูปแบบ [name, name]
+        available_names = [name[0] for name in all_materials_in_db if name[0] is not None]
+        print(f"🕵️‍♂️ AVAILABLE 'name_en' IN LOCAL DB: {available_names}")
+    except Exception as e:
+        print(f"❌ DEBUG ERROR: Could not fetch all material names from DB: {e}")
+    # ========================================================
 
+    # สร้างชุดคำค้นหาที่ครอบคลุมและสะอาด
+    search_terms = set()
+    for name in material_names:
+        clean_name = name.strip().lower() 
+        search_terms.add(clean_name)
+        if clean_name.endswith('s'):
+            search_terms.add(clean_name[:-1])
+    
+    print(f"🧐 Searching for terms: {list(search_terms)}")
+
+    # สร้าง query ที่ค้นหาแบบไม่สนใจตัวพิมพ์และช่องว่าง
+    query = db.query(Material).filter(func.lower(func.trim(Material.name_en)).in_(search_terms))
+    found_materials = query.all()
+    
+    unique_materials = {mat.material_name: mat for mat in found_materials}.values()
+
+    material_details = [
+        {
+            "material_name": mat.material_name,
+            "unit_price_thb": float(mat.unit_price_thb),
+            "unit_type": mat.unit_type
+        }
+        for mat in unique_materials
+    ]
+    print(f"🔍 Found materials in DB: {material_details}")
+    return material_details
+
+# --- ฟังก์ชัน calculate_quantities เหมือนเดิม ---
+def calculate_quantities(materials: List[Dict], budget: float) -> List[Dict]:
+    if not materials:
+        return []
+
+    sorted_materials = sorted(materials, key=lambda x: x['unit_price_thb'])
+    
+    bom_with_quantities = []
+    remaining_budget = budget
+    
+    for mat in sorted_materials:
+        if remaining_budget >= mat['unit_price_thb']:
+            mat['quantity'] = 1
+            remaining_budget -= mat['unit_price_thb']
+        else:
+            mat['quantity'] = 0
+    
+    while remaining_budget > 0:
+        added_something = False
+        for mat in sorted_materials:
+            if mat['quantity'] > 0 and remaining_budget >= mat['unit_price_thb']:
+                mat['quantity'] += 1
+                remaining_budget -= mat['unit_price_thb']
+                added_something = True
+        if not added_something:
+            break
+            
+    for mat in sorted_materials:
+        mat['estimated_cost'] = mat['quantity'] * mat['unit_price_thb']
+
+    final_bom = [mat for mat in sorted_materials if mat['quantity'] > 0]
+    print(f"✅ Calculated quantities: {final_bom}")
+    return final_bom
+
+
+# --- ฟังก์ชันหลัก analyze_bom_from_image เหมือนเดิม ---
+def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget: Optional[float] = 100000.0) -> List[BOMItem]:
     try:
         response = requests.get(image_url)
         response.raise_for_status()
-        image = Image.open(io.BytesIO(response.content)).convert("RGB")
+        image_b64 = base64.b64encode(response.content).decode("utf-8")
     except Exception as e:
         raise ValueError(f"Failed to load image from {image_url}: {str(e)}")
 
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    image_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    prompt = (
-        "วิเคราะห์ภาพสวนนี้และแนะนำรายการวัสดุที่มี material_name, quantity, "
-        "estimated_cost (ในหน่วยบาทไทย, ทศนิยมสูงสุด 2 ตำแหน่ง), และ affiliate_link. "
-        "ใช้เฉพาะวัสดุจากรายการที่กำหนดในตารางด้านล่างตามสไตล์สวนที่ระบุใน prompt. "
-        "ส่งกลับเป็น JSON array ที่ถูกต้องเท่านั้น ไม่ต้องมีคำอธิบายหรือ markdown."
-    )
-    if budget:
-        prompt += f" ตรวจสอบให้แน่ใจว่าราคารวมทั้งหมดไม่เกิน {budget} บาท."
-
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
-                ]
-            }
-        ],
-        max_tokens=400
-    )
-
-    try:
-        raw_response = response.choices[0].message.content
-        print("🧠 Raw response from OpenAI (image prompt):\n", raw_response)
-        raw_response = clean_openai_response(raw_response)
-        if not raw_response.startswith('['):
-            raw_response = '[' + raw_response
-        if not raw_response.endswith(']'):
-            raw_response = raw_response.rstrip(',') + ']'
-        bom_data = json.loads(raw_response)
-
-        if not isinstance(bom_data, list):
-            bom_data = [bom_data]
-
-        total_cost = sum(item.get("estimated_cost", 0.0) for item in bom_data)
-        print(f"💵 Total estimated cost: {total_cost} บาท | Budget: {budget if budget else 'None'}")
-
-        if budget and total_cost > budget:
-            print("⚠️ Cost exceeds budget. Falling back to budget-based suggestion.")
-            return analyze_bom_from_budget(budget, prompt)  # ส่ง prompt ไปด้วย
-
-        return [
-            BOMItem(
-                material_name=item.get("material_name", "ไม่ระบุ"),
-                quantity=item.get("quantity", 1),
-                estimated_cost=float(item.get("estimated_cost", 0.0)),
-                affiliate_link=item.get("affiliate_link", "")
-            )
-            for item in bom_data
-        ]
-
-    except json.JSONDecodeError as e:
-        print(f"❌ JSON Decode Error parsing BOM from image: {str(e)}")
-        print(f"📄 Raw response:\n{raw_response}")
-        if budget:
-            print("🔁 Falling back to budget-based analysis...")
-            return analyze_bom_from_budget(budget, prompt)  # ส่ง prompt ไปด้วย
-        return default_bom_fallback(budget)
-    except Exception as e:
-        print(f"❌ General Error parsing BOM from image: {str(e)}")
-        print(f"📄 Raw response:\n{raw_response}")
+    material_names = get_materials_from_image(image_b64)
+    if not material_names:
+        print("⚠️ AI could not identify any materials. Using fallback.")
         return default_bom_fallback(budget)
 
-def analyze_bom_from_budget(budget: float, prompt: str = "") -> List[BOMItem]:
-    # รายการวัสดุตามตารางที่ล็อกไว้
-    MATERIAL_CATALOG = {
-        "english": [
-            {"material_name": "กุหลาบ", "unit_price": 1200},
-            {"material_name": "พยับหมอก", "unit_price": 600},
-            {"material_name": "เดซี่", "unit_price": 500},
-            {"material_name": "โรสแมรี่", "unit_price": 300},
-            {"material_name": "ต้นนีออน", "unit_price": 400},
-            {"material_name": "สนมังกร", "unit_price": 250},
-            {"material_name": "สนฉัตร", "unit_price": 250},
-        ],
-        "tropical": [
-            {"material_name": "ปาล์ม", "unit_price": 1500},
-            {"material_name": "บานบุรี", "unit_price": 800},
-            {"material_name": "เฮเลโคนีย์", "unit_price": 700},
-            {"material_name": "เฟินใบมะขาม", "unit_price": 350},
-            {"material_name": "เอื้องหมายนา", "unit_price": 600},
-            {"material_name": "ต้นคล้า", "unit_price": 400},
-            {"material_name": "ไอริช", "unit_price": 300},
-        ],
-        "japanese": [
-            {"material_name": "โบนไซ", "unit_price": 2000},
-            {"material_name": "ไผ่", "unit_price": 800},
-            {"material_name": "ต้นสนญี่ปุ่น", "unit_price": 1500},
-            {"material_name": "สนใบพาย", "unit_price": 400},
-            {"material_name": "มอส", "unit_price": 400},
-            {"material_name": "หลิวลู่ลม", "unit_price": 500},
-            {"material_name": "ไอริส", "unit_price": 600},
-        ]
-    }
+    material_details = get_material_details_from_db(material_names, db)
+    if not material_details:
+        print("⚠️ No matching materials found in DB. Using fallback.")
+        return default_bom_fallback(budget)
 
-    # ตรวจสอบสไตล์จาก prompt โดยใช้ regex
-    style = "english"  # Default
-    if "tropical" in prompt.lower():
-        style = "tropical"
-    elif "japanese" in prompt.lower():
-        style = "japanese"
-    elif "english" in prompt.lower():
-        style = "english"
+    final_bom_data = calculate_quantities(material_details, budget)
 
-    catalog = MATERIAL_CATALOG[style]
+    return [
+        BOMItem(
+            material_name=item["material_name"],
+            quantity=item["quantity"],
+            unit_type=item["unit_type"],
+            estimated_cost=item["estimated_cost"],
+            affiliate_link=""
+        )
+        for item in final_bom_data
+    ]
 
-    catalog_str = "\n".join([f"- {item['material_name']} (ราคาเฉลี่ย: {item['unit_price']} บาท)" for item in catalog])
-
-    prompt = f"""
-        คุณเป็นนักออกแบบสวนที่เชี่ยวชาญ
-
-        ลูกค้าต้องการจัดสวนสไตล์ {style} โดยใช้งบประมาณไม่เกิน {budget} บาท กรุณาแนะนำวัสดุและอุปกรณ์ที่จำเป็น โดยเลือกจากวัสดุที่กำหนดไว้ด้านล่าง และคำนวณราคาโดยรวมทั้งหมดต้องไม่เกินงบประมาณที่ให้
-
-        **วัสดุที่เลือกได้:**
-        {catalog_str}
-
-        **รูปแบบผลลัพธ์ที่ต้องการ:**
-        - แสดงชื่อวัสดุเป็นภาษาไทย
-        - ระบุจำนวน (`quantity`) และ `estimated_cost` เป็นจำนวนเงินบาท (จำนวนเต็มหรือทศนิยมไม่เกิน 2 ตำแหน่ง)        
-        - ระบุลิงก์สินค้าใน `affiliate_link`
-        - ส่งกลับเป็น JSON array เท่านั้น พร้อมฟิลด์ `\"total_estimated_cost\"` ที่เป็นผลรวมของราคาทั้งหมด
-        - ห้ามมีข้อความอธิบายอื่นใดนอกเหนือจาก JSON
-
-        **ตัวอย่าง:**
-        ```json
-        [
-            {{
-                \"material_name\": \"กุหลาบ\",
-                \"quantity\": 2,
-                \"estimated_cost\": 2400,
-                \"affiliate_link\": \"https://example.com/rose\"
-            }},
-            ...
-        ],
-        \"total_estimated_cost\": 98950
-        ตอบเป็น JSON array อย่างเดียว ห้ามมีคำอธิบายหรือ markdown
-        """
-
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=400
-    )
-
-    try:
-        raw_response = response.choices[0].message.content
-        print("🧠 Raw response from OpenAI (budget fallback):\n", raw_response)
-        raw_response = clean_openai_response(raw_response)
-
-        total_match = re.search(r'"total_estimated_cost"\s*:\s*(\d+(\.\d+)?)', raw_response)
-        total_cost = float(total_match.group(1)) if total_match else 0.0
-        raw_json = re.sub(r',?\s*"total_estimated_cost"\s*:\s*\d+(\.\d+)?', "", raw_response)
-
-        bom_data = json.loads(raw_json)
-        if not isinstance(bom_data, list):
-            bom_data = [bom_data]
-
-        return [
-            BOMItem(
-                material_name=item.get("material_name", "ไม่ระบุ"),
-                quantity=item.get("quantity", 1),
-                estimated_cost=float(item.get("estimated_cost", 0.0)),
-                affiliate_link=item.get("affiliate_link", "")
-            )
-            for item in bom_data
-        ]
-    except json.JSONDecodeError as e:
-            print(f"❌ JSON Decode Error parsing BOM from budget fallback: {str(e)}")
-            print(f"📄 Raw response:\n{raw_response}")
-            return default_bom_fallback(budget)
-    except Exception as e:
-            print(f"❌ General Error parsing BOM from budget fallback: {str(e)}")
-            print(f"📄 Raw response:\n{raw_response}")
-            return default_bom_fallback(budget)
-
+# --- ฟังก์ชัน default_bom_fallback เหมือนเดิม ---
 def default_bom_fallback(budget: Optional[float] = None) -> List[BOMItem]:
+    cost = 150.00
     if budget:
-        return [BOMItem(material_name="ดินปลูก", quantity=10, estimated_cost=min(150.00, budget/10), affiliate_link="https://shopee.co.th/dirt")]
-    return [BOMItem(material_name="ดินปลูก", quantity=10, estimated_cost=150.00, affiliate_link="https://shopee.co.th/dirt")]
+        cost = min(cost, budget / 10)
+    return [
+        BOMItem(
+            material_name="ดินปลูก", 
+            quantity=10, 
+            unit_type="ถุง",
+            estimated_cost=cost * 10, 
+            affiliate_link="https://shopee.co.th/dirt"
+        )
+    ]

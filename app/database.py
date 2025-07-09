@@ -2,27 +2,56 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
+from dotenv import load_dotenv
 
-# ตรวจสอบและกำหนด DATABASE_URL
-DATABASE_URL = os.getenv("DATABASE_URL")
+# โหลด .env ก่อนทำอย่างอื่น
+load_dotenv()
+
+# ตรวจสอบสภาพแวดล้อม (Environment)
+IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT") is not None
+
+if IS_PRODUCTION:
+    # เมื่อรันบน Railway ให้ใช้ DATABASE_URL (ที่อยู่ภายใน)
+    DATABASE_URL = os.getenv("DATABASE_URL")
+    print("✅ Running in PRODUCTION mode. Using internal database URL.")
+else:
+    # เมื่อรันบนเครื่อง (Local) ให้ใช้ LOCAL_DATABASE_URL ที่คุณตั้งไว้
+    DATABASE_URL = os.getenv("LOCAL_DATABASE_URL")
+    print("✅ Running in LOCAL mode. Using local database URL.")
+
+# ตรวจสอบว่ามี URL หรือไม่
 if not DATABASE_URL:
-    # Fallback to local PostgreSQL if no DATABASE_URL is set
-    DATABASE_URL = os.getenv("LOCAL_DATABASE_URL", "postgresql://postgres:password@localhost:5432/plantpick")
-    print(f"Warning: DATABASE_URL not found, falling back to {DATABASE_URL}")
+    raise ConnectionError(
+        "Database URL is not set. Please check your .env file and ensure "
+        "either DATABASE_URL (for production) or LOCAL_DATABASE_URL (for local) is set."
+    )
 
 try:
     engine = create_engine(DATABASE_URL)
-    # ตรวจสอบการเชื่อมต่อ (ถ้า fail จะ raise exception)
+    # ตรวจสอบการเชื่อมต่อ
     with engine.connect() as connection:
         connection.close()
-    print("Database connection established successfully")
+    print("🚀 Database connection established successfully!")
 except Exception as e:
+    # แสดง Error ที่ชัดเจนขึ้น
+    print(f"❌ Failed to connect to database using URL: {DATABASE_URL}")
     raise ConnectionError(f"Failed to connect to database: {str(e)}")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Define Models
+# โค้ดส่วน Model ที่ถูกต้องทั้งหมดจะอยู่ตรงนี้
+class Material(Base):
+    __tablename__ = "materials"
+    id = Column(Integer, primary_key=True)
+    created_at = Column(TIMESTAMP, server_default='now()')
+    material_name = Column(String, nullable=False) # ชื่อภาษาไทยสำหรับแสดงผล
+    name_en = Column(String, nullable=True) # ชื่อภาษาอังกฤษ
+    style_tag = Column(String)
+    unit_price_thb = Column(DECIMAL(10, 2), nullable=False, default=0)
+    unit_type = Column(String, nullable=False)
+    affiliate_link = Column(String)
+
 class UsageLimit(Base):
     __tablename__ = "usage_limits"
     limit_id = Column(Integer, primary_key=True)
@@ -45,9 +74,9 @@ class BOMDetail(Base):
     __tablename__ = "bom_details"
     bom_id = Column(Integer, primary_key=True)
     history_id = Column(Integer, ForeignKey("generation_history.history_id"), nullable=False)
-    material_name = Column(String, nullable=False)     # เช่น "ต้นไม้"
-    quantity = Column(DECIMAL(10, 2), nullable=False)  # เช่น 5.00
-    estimated_cost = Column(DECIMAL(10, 2), nullable=False)  # บาท
+    material_name = Column(String, nullable=False)
+    quantity = Column(DECIMAL(10, 2), nullable=False)
+    estimated_cost = Column(DECIMAL(10, 2), nullable=False)
     affiliate_link = Column(String)
     created_at = Column(TIMESTAMP, nullable=False)
 
@@ -63,7 +92,6 @@ class GardenRequest(Base):
     fee_charged = Column(DECIMAL(10, 2), default=0.00)
     total_cost = Column(DECIMAL(10, 2), nullable=True)
 
-# สร้างตาราง (เพิ่มเงื่อนไขไม่สร้างซ้ำ)
 def init_db():
     Base.metadata.create_all(bind=engine)
     print("Database tables initialized or already exist.")

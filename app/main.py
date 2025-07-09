@@ -1,7 +1,7 @@
 import os
 import uvicorn
 from fastapi import FastAPI
-from app.routers import upload, shopee, identify, search, generate_garden, garden_controlnet_test
+from app.routers import upload, shopee, identify, search, generate_garden
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,7 +34,6 @@ app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])
 app.include_router(identify.router, tags=["Identify"])
 app.include_router(search.router, tags=["Search"])
 app.include_router(generate_garden.router, prefix="/garden", tags=["Garden"])  # Add prefix
-app.include_router(garden_controlnet_test.router, prefix="/garden-test")
 
 if __name__ == "__main__":
     print("🚀 Railway is running `main.py`!")
