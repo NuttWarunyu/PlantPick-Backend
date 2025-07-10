@@ -1,27 +1,21 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, ForeignKey, DECIMAL, Boolean, Numeric
+# === จุดแก้ไข: Import ARRAY จาก sqlalchemy.dialects.postgresql ===
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 from dotenv import load_dotenv
 
-# โหลด .env ก่อนทำอย่างอื่น
+# (โค้ดส่วนบนเหมือนเดิมทั้งหมด)
 load_dotenv()
-
-# ตรวจสอบสภาพแวดล้อม (Environment)
 IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT") is not None
-
 if IS_PRODUCTION:
     DATABASE_URL = os.getenv("DATABASE_URL")
     print("✅ Running in PRODUCTION mode. Using internal database URL.")
 else:
     DATABASE_URL = os.getenv("LOCAL_DATABASE_URL")
     print("✅ Running in LOCAL mode. Using local/public database URL.")
-
 if not DATABASE_URL:
-    raise ConnectionError(
-        "Database URL is not set. Please check your .env file and ensure "
-        "either DATABASE_URL (for production) or LOCAL_DATABASE_URL (for local) is set."
-    )
-
+    raise ConnectionError("Database URL is not set.")
 try:
     engine = create_engine(DATABASE_URL)
     with engine.connect() as connection:
@@ -34,10 +28,7 @@ except Exception as e:
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# =================================================================
-# === โครงสร้างโมเดลใหม่สำหรับ Marketplace ===
-# =================================================================
-
+# (โมเดล Material, Vendor, Product เหมือนเดิม)
 class Material(Base):
     __tablename__ = "materials"
     id = Column(Integer, primary_key=True)
@@ -47,6 +38,10 @@ class Material(Base):
     description = Column(Text)
     image_url = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
+    sun_requirement = Column(String(50))
+    water_requirement = Column(String(50))
+    is_native_th = Column(Boolean)
+    soil_type = Column(Text)
 
 class Vendor(Base):
     __tablename__ = "vendors"
@@ -58,6 +53,8 @@ class Vendor(Base):
     location = Column(Text)
     rating = Column(Numeric(2, 1), default=0.0)
     created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
+    delivery_areas = Column(ARRAY(Text))
+    has_installation_service = Column(Boolean, default=False)
 
 class Product(Base):
     __tablename__ = "products"
@@ -70,11 +67,16 @@ class Product(Base):
     product_url = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
+    size_options = Column(JSONB)
 
-# =================================================================
-# === โมเดลเก่า (ยังคงไว้เผื่อใช้งาน) ===
-# =================================================================
+class material_relationships(Base):
+    __tablename__ = "material_relationships"
+    material_id_1 = Column(Integer, ForeignKey("materials.id"), primary_key=True)
+    material_id_2 = Column(Integer, ForeignKey("materials.id"), primary_key=True)
+    relationship_type = Column(String(100))
+    notes = Column(Text)
 
+# === จุดแก้ไข: เพิ่มคอลัมน์ใหม่ในโมเดล GenerationHistory ===
 class GenerationHistory(Base):
     __tablename__ = "generation_history"
     history_id = Column(Integer, primary_key=True)
@@ -84,7 +86,10 @@ class GenerationHistory(Base):
     created_at = Column(TIMESTAMP, nullable=False)
     ddim_steps = Column(Integer, default=10)
     user_agent = Column(String)
+    selected_tags = Column(ARRAY(Text)) # <-- เพิ่มคอลัมน์สำหรับเก็บแท็ก
+    budget_level = Column(Integer)      # <-- เพิ่มคอลัมน์สำหรับเก็บระดับงบประมาณ
 
+# (โมเดล BOMDetail, GardenRequest เหมือนเดิม)
 class BOMDetail(Base):
     __tablename__ = "bom_details"
     bom_id = Column(Integer, primary_key=True)
@@ -95,7 +100,6 @@ class BOMDetail(Base):
     affiliate_link = Column(String)
     created_at = Column(TIMESTAMP, nullable=False)
 
-# === จุดแก้ไข: เพิ่มโมเดล GardenRequest กลับเข้ามา ===
 class GardenRequest(Base):
     __tablename__ = "garden_requests"
     request_id = Column(Integer, primary_key=True)
@@ -107,7 +111,7 @@ class GardenRequest(Base):
     created_at = Column(TIMESTAMP, nullable=False)
     fee_charged = Column(DECIMAL(10, 2), default=0.00)
     total_cost = Column(DECIMAL(10, 2), nullable=True)
-# ====================================================
+
 
 def init_db():
     Base.metadata.create_all(bind=engine)
