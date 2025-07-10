@@ -1,21 +1,23 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, ForeignKey, DECIMAL, Boolean, Numeric
-# === จุดแก้ไข: Import ARRAY และ JSONB จาก sqlalchemy.dialects.postgresql ===
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 from dotenv import load_dotenv
 
-# (โค้ดส่วนบนเหมือนเดิมทั้งหมด)
 load_dotenv()
+
 IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT") is not None
+
 if IS_PRODUCTION:
     DATABASE_URL = os.getenv("DATABASE_URL")
     print("✅ Running in PRODUCTION mode. Using internal database URL.")
 else:
     DATABASE_URL = os.getenv("LOCAL_DATABASE_URL")
     print("✅ Running in LOCAL mode. Using local/public database URL.")
+
 if not DATABASE_URL:
     raise ConnectionError("Database URL is not set.")
+
 try:
     engine = create_engine(DATABASE_URL)
     with engine.connect() as connection:
@@ -28,10 +30,8 @@ except Exception as e:
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# =================================================================
-# === โครงสร้างโมเดลใหม่สำหรับ Marketplace ===
-# =================================================================
-
+# (โมเดล Material, Vendor, Product, material_relationships เหมือนเดิม)
+# ... (โค้ดส่วนนี้ไม่มีการเปลี่ยนแปลง)
 class Material(Base):
     __tablename__ = "materials"
     id = Column(Integer, primary_key=True)
@@ -70,7 +70,7 @@ class Product(Base):
     product_url = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
-    size_options = Column(JSONB) # <-- ตอนนี้ Python รู้จัก JSONB แล้ว
+    size_options = Column(JSONB)
 
 class material_relationships(Base):
     __tablename__ = "material_relationships"
@@ -78,10 +78,14 @@ class material_relationships(Base):
     material_id_2 = Column(Integer, ForeignKey("materials.id"), primary_key=True)
     relationship_type = Column(String(100))
     notes = Column(Text)
+# ... (จบส่วนที่ไม่มีการเปลี่ยนแปลง)
 
+
+# === จุดแก้ไข: เพิ่มคอลัมน์ replicate_prediction_id ===
 class GenerationHistory(Base):
     __tablename__ = "generation_history"
     history_id = Column(Integer, primary_key=True)
+    replicate_prediction_id = Column(String(255), nullable=True, index=True) # <-- เพิ่มคอลัมน์นี้
     ip = Column(String, nullable=False)
     image_url = Column(String)
     prompt = Column(Text, nullable=False)
@@ -91,6 +95,8 @@ class GenerationHistory(Base):
     selected_tags = Column(ARRAY(Text))
     budget_level = Column(Integer)
 
+# (โมเดล BOMDetail, GardenRequest เหมือนเดิม)
+# ... (โค้ดส่วนนี้ไม่มีการเปลี่ยนแปลง)
 class BOMDetail(Base):
     __tablename__ = "bom_details"
     bom_id = Column(Integer, primary_key=True)
@@ -112,6 +118,7 @@ class GardenRequest(Base):
     created_at = Column(TIMESTAMP, nullable=False)
     fee_charged = Column(DECIMAL(10, 2), default=0.00)
     total_cost = Column(DECIMAL(10, 2), nullable=True)
+# ... (จบส่วนที่ไม่มีการเปลี่ยนแปลง)
 
 
 def init_db():
