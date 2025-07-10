@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, ForeignKey, DECIMAL, Boolean, Numeric
-# === จุดแก้ไข: Import ARRAY จาก sqlalchemy.dialects.postgresql ===
-from sqlalchemy.dialects.postgresql import ARRAY
+# === จุดแก้ไข: Import ARRAY และ JSONB จาก sqlalchemy.dialects.postgresql ===
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 from dotenv import load_dotenv
@@ -28,7 +28,10 @@ except Exception as e:
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# (โมเดล Material, Vendor, Product เหมือนเดิม)
+# =================================================================
+# === โครงสร้างโมเดลใหม่สำหรับ Marketplace ===
+# =================================================================
+
 class Material(Base):
     __tablename__ = "materials"
     id = Column(Integer, primary_key=True)
@@ -67,7 +70,7 @@ class Product(Base):
     product_url = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
-    size_options = Column(JSONB)
+    size_options = Column(JSONB) # <-- ตอนนี้ Python รู้จัก JSONB แล้ว
 
 class material_relationships(Base):
     __tablename__ = "material_relationships"
@@ -76,7 +79,6 @@ class material_relationships(Base):
     relationship_type = Column(String(100))
     notes = Column(Text)
 
-# === จุดแก้ไข: เพิ่มคอลัมน์ใหม่ในโมเดล GenerationHistory ===
 class GenerationHistory(Base):
     __tablename__ = "generation_history"
     history_id = Column(Integer, primary_key=True)
@@ -86,10 +88,9 @@ class GenerationHistory(Base):
     created_at = Column(TIMESTAMP, nullable=False)
     ddim_steps = Column(Integer, default=10)
     user_agent = Column(String)
-    selected_tags = Column(ARRAY(Text)) # <-- เพิ่มคอลัมน์สำหรับเก็บแท็ก
-    budget_level = Column(Integer)      # <-- เพิ่มคอลัมน์สำหรับเก็บระดับงบประมาณ
+    selected_tags = Column(ARRAY(Text))
+    budget_level = Column(Integer)
 
-# (โมเดล BOMDetail, GardenRequest เหมือนเดิม)
 class BOMDetail(Base):
     __tablename__ = "bom_details"
     bom_id = Column(Integer, primary_key=True)
