@@ -7,8 +7,8 @@ import redis
 from sqlalchemy.orm import Session
 from typing import List
 
-# Import โมเดลและฟังก์ชันที่จำเป็นทั้งหมด
-from app.database import SessionLocal, GenerationHistory, BOMDetail
+# === จุดแก้ไข: นำเข้า Model และฟังก์ชันที่จำเป็นทั้งหมดกลับมา ===
+from app.database import SessionLocal, GenerationHistory, BOMDetail, GardenRequest
 from supabase import create_client, Client
 from .analyze_bom import analyze_bom_from_image
 from pydantic import BaseModel
@@ -100,42 +100,63 @@ async def generate_inpainting(
     request: Request = None,
     db: Session = Depends(get_db)
 ):
-    if not INPAINT_MODEL_VERSION:
-        raise HTTPException(status_code=500, detail="REPLICATE_INPAINT_MODEL_VERSION is not set on the server.")
-    user_ip = request.client.host
-    logger.info(f"🎨 New 'Realistic Mode' request from {user_ip}")
-    key = f"ip:{user_ip}:daily_limit"
-    daily_used = int(redis_client.get(key) or 0)
-    if daily_used >= 300:
-        raise HTTPException(status_code=403, detail="Daily limit exceeded")
+    logger.info("--- Starting /generate-inpainting ---")
     try:
+        if not INPAINT_MODEL_VERSION:
+            logger.error("❌ REPLICATE_INPAINT_MODEL_VERSION is not set.")
+            raise HTTPException(status_code=500, detail="REPLICATE_INPAINT_MODEL_VERSION is not set on the server.")
+        logger.info("✅ Model version check passed.")
+
+        user_ip = request.client.host
+        logger.info(f"🎨 New 'Realistic Mode' request from {user_ip}")
+
+        key = f"ip:{user_ip}:daily_limit"
+        daily_used = int(redis_client.get(key) or 0)
+        if daily_used >= 300:
+            raise HTTPException(status_code=403, detail="Daily limit exceeded")
+        logger.info("✅ Daily limit check passed.")
+
+        logger.info("Reading image file...")
         image_bytes = await image.read()
+        logger.info("Reading mask file...")
         mask_bytes = await mask.read()
+        logger.info("✅ Files read successfully.")
+
+        logger.info("Processing original image...")
         image_b64 = image_to_base64(resize_image(Image.open(io.BytesIO(image_bytes)).convert("RGB")))
+        logger.info("Processing mask image...")
         mask_b64 = image_to_base64(resize_image(Image.open(io.BytesIO(mask_bytes)).convert("L")))
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
-    payload = {
-        "version": INPAINT_MODEL_VERSION,
-        "input": {
-            "image": f"data:image/png;base64,{image_b64}",
-            "mask": f"data:image/png;base64,{mask_b64}",
-            "prompt": prompt
+        logger.info("✅ Image processing complete.")
+
+        payload = {
+            "version": INPAINT_MODEL_VERSION,
+            "input": {
+                "image": f"data:image/png;base64,{image_b64}",
+                "mask": f"data:image/png;base64,{mask_b64}",
+                "prompt": prompt
+            }
         }
-    }
-    response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
-    if response.status_code != 201:
-        return JSONResponse(status_code=500, content={"error": "Replicate request failed", "details": response.text})
-    prediction_data = response.json()
-    prediction_id = prediction_data.get("id")
-    try:
+        logger.info("🚀 Sending request to Replicate...")
+        response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
+        response.raise_for_status()
+        logger.info("✅ Replicate request successful.")
+
+        prediction_data = response.json()
+        prediction_id = prediction_data.get("id")
+        
+        logger.info(f"💾 Saving initial history with prediction_id: {prediction_id}")
         new_request = GenerationHistory(ip=user_ip, prompt=prompt, selected_tags=selected_tags, replicate_prediction_id=prediction_id, created_at=datetime.now(), user_agent=request.headers.get("user-agent"))
         db.add(new_request)
         db.commit()
+        logger.info("✅ History saved.")
+
+        return {"status": "processing", "prediction_id": prediction_id}
+
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
-        db.rollback()
-        return JSONResponse(status_code=500, content={"error": f"Database error: {str(e)}"})
-    return {"status": "processing", "prediction_id": prediction_id}
+        logger.error(f"💥 UNEXPECTED ERROR in /generate-inpainting: {str(e)}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": f"An unexpected error occurred: {str(e)}"})
 
 
 @router.get("/check-prediction/{prediction_id}")
@@ -167,7 +188,6 @@ async def check_prediction(prediction_id: str = Path(...), db: Session = Depends
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
-
 
 # === Endpoint /generate-bom ที่หายไป กลับมาแล้ว! ===
 class BOMRequest(BaseModel):
@@ -207,10 +227,10 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
         for item in main_bom_items:
             db.add(BOMDetail(
                 history_id=req.history_id,
-                material_name=f"{item.material_name} (from {item.vendor_name})",
-                quantity=item.quantity,
-                estimated_cost=item.estimated_cost,
-                affiliate_link=item.product_url or "",
+                material_name=f"{item['material_name']} (from {item['vendor_name']})",
+                quantity=item['quantity'],
+                estimated_cost=item['estimated_cost'],
+                affiliate_link=item.get('product_url', ""),
                 created_at=datetime.now()
             ))
         db.commit()
