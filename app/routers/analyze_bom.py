@@ -2,10 +2,10 @@ from typing import List, Optional, Dict
 from pydantic import BaseModel
 import os
 from openai import OpenAI
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from sqlalchemy import func
-# === จุดแก้ไขที่ 1: Import โมเดลใหม่ทั้งหมด ===
-from app.database import Material, Vendor, Product
+# === Import โมเดลใหม่ทั้งหมด ===
+from app.database import Material, Vendor, Product, AITermMapping
 import requests
 from PIL import Image
 import io
@@ -13,38 +13,28 @@ import base64
 import json
 import re
 
-# ตั้งค่า OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# === จุดแก้ไขที่ 2: อัปเดต Pydantic Model ให้รองรับข้อมูลร้านค้า ===
 class BOMItem(BaseModel):
     material_name: str
     quantity: int
     unit_type: str
-    vendor_name: str # เพิ่มชื่อร้านค้า
-    unit_price: float # เพิ่มราคาต่อหน่วย
+    vendor_name: str
+    unit_price: float
     estimated_cost: float
     product_url: Optional[str] = None
 
-# --- ฟังก์ชันนี้เหมือนเดิม ---
 def get_materials_from_image(image_b64: str) -> List[str]:
     """ใช้ AI Vision เพื่อลิสต์ชื่อวัสดุที่เห็นในภาพ"""
     try:
-        # ... (โค้ดส่วนนี้เหมือนเดิม) ...
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text",
-                            "text": "Analyze this garden image and list all visible materials like plants, stones, wood, etc. Return only a clean JSON array of strings. For example: [\"Palm Tree\", \"Paving Stone\", \"Wooden Deck\"]. Do not include any explanation."
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{image_b64}"}
-                        }
+                        {"type": "text", "text": "Analyze this garden image and list all visible materials like plants, stones, wood, etc. Return only a clean JSON array of strings. For example: [\"Palm Tree\", \"Paving Stone\", \"Wooden Deck\"]. Do not include any explanation."},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
                     ]
                 }
             ],
@@ -59,41 +49,20 @@ def get_materials_from_image(image_b64: str) -> List[str]:
         print(f"❌ Error getting materials from image: {e}")
         return []
 
-# --- ฟังก์ชันใหม่: ค้นหาสินค้าที่ราคาถูกที่สุดสำหรับแต่ละวัสดุ ---
-def find_cheapest_products_in_db(material_names: List[str], db: Session) -> List[Dict]:
-    """
-    สำหรับวัสดุแต่ละชนิดที่ AI หาเจอ, ค้นหาว่าร้านไหนขายถูกที่สุด
-    """
-    if not material_names:
-        return []
-
-    search_terms = set()
-    for name in material_names:
-        clean_name = name.strip().lower()
-        search_terms.add(clean_name)
-        if clean_name.endswith('s'):
-            search_terms.add(clean_name[:-1])
-
-    # Query ที่ซับซ้อนขึ้นเพื่อหาราคาที่ถูกที่สุดของแต่ละ material
-    # เราจะใช้ Subquery เพื่อหา min_price ของแต่ละ material_id ก่อน
-    subquery = (
-        db.query(Product.material_id, func.min(Product.price_thb).label("min_price"))
-        .group_by(Product.material_id)
-        .subquery()
-    )
-
-    # จากนั้น JOIN เพื่อหาข้อมูลทั้งหมดของสินค้าที่ราคาตรงกับ min_price
+def find_best_products_by_category(category: str, db: Session, limit: int = 3) -> List[Dict]:
+    """สำหรับ Category ที่กำหนด, ค้นหาสินค้าที่มีราคาถูกที่สุดตามจำนวนที่ระบุ"""
     query = (
         db.query(Product, Vendor, Material)
-        .join(subquery, (Product.material_id == subquery.c.material_id) & (Product.price_thb == subquery.c.min_price))
         .join(Vendor, Product.vendor_id == Vendor.id)
         .join(Material, Product.material_id == Material.id)
-        .filter(func.lower(func.trim(Material.name_en)).in_(search_terms))
+        .filter(Material.category == category)
+        .order_by(Product.price_thb.asc())
+        .limit(limit)
     )
-    
-    results = query.all()
-    
-    cheapest_products = [
+    best_products = query.all()
+    if not best_products:
+        return []
+    return [
         {
             "material_name": material.material_name,
             "unit_price_thb": float(product.price_thb),
@@ -101,60 +70,18 @@ def find_cheapest_products_in_db(material_names: List[str], db: Session) -> List
             "vendor_name": vendor.vendor_name,
             "product_url": product.product_url
         }
-        for product, vendor, material in results
+        for product, vendor, material in best_products
     ]
-    
-    print(f"🛍️ Found cheapest products in DB: {cheapest_products}")
-    return cheapest_products
 
-# --- ฟังก์ชันคำนวณจำนวน (ปรับปรุงเล็กน้อย) ---
-def calculate_quantities(products: List[Dict], budget: float) -> List[Dict]:
-    """คำนวณจำนวนที่เหมาะสมสำหรับแต่ละสินค้าภายใต้งบประมาณ"""
-    if not products:
-        return []
-
-    # เรียงจากถูกไปแพง
-    sorted_products = sorted(products, key=lambda x: x['unit_price_thb'])
-    
-    remaining_budget = budget
-    
-    # ให้ทุกอย่างมีอย่างน้อย 1 ชิ้นก่อน
-    for prod in sorted_products:
-        if remaining_budget >= prod['unit_price_thb']:
-            prod['quantity'] = 1
-            remaining_budget -= prod['unit_price_thb']
-        else:
-            prod['quantity'] = 0
-    
-    # วนลูปเพิ่มจำนวนของชิ้นที่ถูกที่สุด
-    while remaining_budget > 0:
-        added_something = False
-        for prod in sorted_products:
-            if prod['quantity'] > 0 and remaining_budget >= prod['unit_price_thb']:
-                prod['quantity'] += 1
-                remaining_budget -= prod['unit_price_thb']
-                added_something = True
-        if not added_something:
-            break
-            
-    # คำนวณราคารวมของแต่ละรายการ
-    for prod in sorted_products:
-        prod['estimated_cost'] = prod['quantity'] * prod['unit_price_thb']
-
-    final_bom = [prod for prod in sorted_products if prod['quantity'] > 0]
-    print(f"✅ Calculated quantities with vendors: {final_bom}")
-    return final_bom
-
-
-# --- ฟังก์ชันหลักที่ถูกเรียกจาก API (เขียนใหม่เกือบทั้งหมด) ---
-def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget: Optional[float] = 100000.0) -> List[BOMItem]:
+# --- ฟังก์ชันหลักที่ถูกเรียกจาก API (เขียนใหม่ทั้งหมด) ---
+def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget: Optional[float] = 100000.0) -> Dict:
     """
-    Workflow ใหม่สำหรับ Marketplace:
-    1. โหลดรูป
-    2. AI วิเคราะห์วัสดุ
-    3. ค้นหาสินค้าที่ถูกที่สุดจากทุกร้าน
-    4. คำนวณจำนวนตามงบ
-    5. ประกอบร่างเป็น BOM สุดท้าย
+    Workflow ใหม่สำหรับ Smart Substitution:
+    1. AI วิเคราะห์วัสดุ
+    2. ค้นหาแบบเจาะจงก่อน (Direct Match)
+    3. ถ้าไม่เจอ ให้ใช้ Mapping Table เพื่อหา Category
+    4. จาก Category, ดึงสินค้าที่ดีที่สุดมา 1 อย่างใส่ BOM และเก็บที่เหลือเป็นคำแนะนำ
+    5. คำนวณจำนวนและประกอบร่าง BOM สุดท้ายพร้อมคำแนะนำ
     """
     try:
         response = requests.get(image_url)
@@ -163,42 +90,105 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
     except Exception as e:
         raise ValueError(f"Failed to load image from {image_url}: {str(e)}")
 
-    material_names = get_materials_from_image(image_b64)
-    if not material_names:
-        return default_bom_fallback(budget)
+    ai_material_names = get_materials_from_image(image_b64)
+    if not ai_material_names:
+        return {"main_bom": default_bom_fallback(budget), "suggestions": {}}
 
-    cheapest_products = find_cheapest_products_in_db(material_names, db)
-    if not cheapest_products:
-        return default_bom_fallback(budget)
+    main_bom_candidates = []
+    suggestions = {}
+    processed_categories = set()
+    processed_specific_materials = set()
 
-    final_bom_data = calculate_quantities(cheapest_products, budget)
-
-    return [
-        BOMItem(
-            material_name=item["material_name"],
-            quantity=item["quantity"],
-            unit_type=item["unit_type"],
-            vendor_name=item["vendor_name"],
-            unit_price=item["unit_price_thb"],
-            estimated_cost=item["estimated_cost"],
-            product_url=item.get("product_url")
+    for name in ai_material_names:
+        clean_name = name.strip().lower()
+        
+        # 1. พยายามหาแบบเจาะจงก่อน (Direct Match)
+        direct_match_query = (
+            db.query(Product, Vendor, Material)
+            .join(Vendor, Product.vendor_id == Vendor.id)
+            .join(Material, Product.material_id == Material.id)
+            .filter(func.lower(Material.name_en) == clean_name)
+            .order_by(Product.price_thb.asc())
         )
-        for item in final_bom_data
-    ]
+        found_product = direct_match_query.first()
+        
+        if found_product:
+            product, vendor, material = found_product
+            # ป้องกันการเพิ่มของซ้ำ
+            if material.material_name not in processed_specific_materials:
+                main_bom_candidates.append({
+                    "material_name": material.material_name, "unit_price_thb": float(product.price_thb),
+                    "unit_type": product.unit_type, "vendor_name": vendor.vendor_name,
+                    "product_url": product.product_url
+                })
+                processed_specific_materials.add(material.material_name)
+            continue
 
-# --- ฟังก์ชันสำรอง (อัปเดตให้ตรงกับ Model ใหม่) ---
+        # 2. ถ้าหาไม่เจอ ให้ไปหาใน "พจนานุกรม" (Mapping Table)
+        mapping_query = db.query(AITermMapping).filter(func.lower(AITermMapping.ai_term) == clean_name)
+        mapping = mapping_query.first()
+
+        if mapping and mapping.maps_to_category not in processed_categories:
+            print(f"↪️ Mapping '{name}' to category '{mapping.maps_to_category}'")
+            best_products_in_category = find_best_products_by_category(mapping.maps_to_category, db, limit=3)
+            
+            if best_products_in_category:
+                # เพิ่มตัวเลือกที่ถูกที่สุดลงใน BOM หลัก
+                main_bom_candidates.append(best_products_in_category[0])
+                
+                # เก็บตัวเลือกที่เหลือเป็นคำแนะนำ
+                if len(best_products_in_category) > 1:
+                    suggestion_key = f"สำหรับหมวดหมู่ '{mapping.maps_to_category}'"
+                    suggestions[suggestion_key] = best_products_in_category[1:]
+                
+                processed_categories.add(mapping.maps_to_category)
+    
+    # ลบรายการที่ซ้ำซ้อนออกจาก Candidate สุดท้าย
+    unique_candidates = list({v['material_name']:v for v in main_bom_candidates}.values())
+    print(f"🛍️ Final candidate products for BOM: {unique_candidates}")
+    
+    if not unique_candidates:
+        return {"main_bom": default_bom_fallback(budget), "suggestions": {}}
+
+    # คำนวณจำนวนและประกอบร่าง BOM หลัก
+    final_bom_data = calculate_quantities(unique_candidates, budget)
+    
+    # จัดรูปแบบข้อมูลสำหรับส่งกลับ
+    main_bom_result = [BOMItem(**item) for item in final_bom_data]
+    suggestions_result = {
+        key: [BOMItem(**item) for item in value]
+        for key, value in suggestions.items()
+    }
+
+    return {"main_bom": main_bom_result, "suggestions": suggestions_result}
+
+def calculate_quantities(products: List[Dict], budget: float) -> List[Dict]:
+    if not products: return []
+    # ... (โค้ดส่วนนี้เหมือนเดิม)
+    sorted_products = sorted(products, key=lambda x: x['unit_price_thb'])
+    remaining_budget = budget
+    for prod in sorted_products:
+        if remaining_budget >= prod['unit_price_thb']:
+            prod['quantity'] = 1
+            remaining_budget -= prod['unit_price_thb']
+        else:
+            prod['quantity'] = 0
+    while remaining_budget > 0:
+        added_something = False
+        for prod in sorted_products:
+            if prod['quantity'] > 0 and remaining_budget >= prod['unit_price_thb']:
+                prod['quantity'] += 1
+                remaining_budget -= prod['unit_price_thb']
+                added_something = True
+        if not added_something: break
+    for prod in sorted_products:
+        prod['estimated_cost'] = prod['quantity'] * prod['unit_price_thb']
+        prod['unit_price'] = prod['unit_price_thb']
+    final_bom = [prod for prod in sorted_products if prod['quantity'] > 0]
+    print(f"✅ Calculated quantities with vendors: {final_bom}")
+    return final_bom
+
 def default_bom_fallback(budget: Optional[float] = None) -> List[BOMItem]:
     cost = 150.00
-    if budget:
-        cost = min(cost, budget / 10)
-    return [
-        BOMItem(
-            material_name="ดินปลูก", 
-            quantity=10, 
-            unit_type="ถุง",
-            vendor_name="ร้านค้าแนะนำ",
-            unit_price=cost,
-            estimated_cost=cost * 10, 
-            product_url="https://shopee.co.th/dirt"
-        )
-    ]
+    if budget: cost = min(cost, budget / 10)
+    return [BOMItem(material_name="ดินปลูก", quantity=10, unit_type="ถุง", vendor_name="ร้านค้าแนะนำ", unit_price=cost, estimated_cost=cost * 10, product_url="https://shopee.co.th/dirt")]

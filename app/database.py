@@ -30,8 +30,8 @@ except Exception as e:
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# (โมเดล Material, Vendor, Product, material_relationships เหมือนเดิม)
-# ... (โค้ดส่วนนี้ไม่มีการเปลี่ยนแปลง)
+# (โมเดล Material, Vendor, Product เหมือนเดิม)
+# ...
 class Material(Base):
     __tablename__ = "materials"
     id = Column(Integer, primary_key=True)
@@ -78,14 +78,20 @@ class material_relationships(Base):
     material_id_2 = Column(Integer, ForeignKey("materials.id"), primary_key=True)
     relationship_type = Column(String(100))
     notes = Column(Text)
-# ... (จบส่วนที่ไม่มีการเปลี่ยนแปลง)
 
+# === เพิ่ม Model ใหม่สำหรับตาราง ai_term_mappings ===
+class AITermMapping(Base):
+    __tablename__ = "ai_term_mappings"
+    id = Column(Integer, primary_key=True)
+    ai_term = Column(String(255), nullable=False, unique=True)
+    maps_to_category = Column(String(100))
+    maps_to_style_tag = Column(String(100))
+# =================================================
 
-# === จุดแก้ไข: เพิ่มคอลัมน์ replicate_prediction_id ===
 class GenerationHistory(Base):
     __tablename__ = "generation_history"
     history_id = Column(Integer, primary_key=True)
-    replicate_prediction_id = Column(String(255), nullable=True, index=True) # <-- เพิ่มคอลัมน์นี้
+    replicate_prediction_id = Column(String(255), nullable=True, index=True)
     ip = Column(String, nullable=False)
     image_url = Column(String)
     prompt = Column(Text, nullable=False)
@@ -95,8 +101,6 @@ class GenerationHistory(Base):
     selected_tags = Column(ARRAY(Text))
     budget_level = Column(Integer)
 
-# (โมเดล BOMDetail, GardenRequest เหมือนเดิม)
-# ... (โค้ดส่วนนี้ไม่มีการเปลี่ยนแปลง)
 class BOMDetail(Base):
     __tablename__ = "bom_details"
     bom_id = Column(Integer, primary_key=True)
@@ -118,8 +122,6 @@ class GardenRequest(Base):
     created_at = Column(TIMESTAMP, nullable=False)
     fee_charged = Column(DECIMAL(10, 2), default=0.00)
     total_cost = Column(DECIMAL(10, 2), nullable=True)
-# ... (จบส่วนที่ไม่มีการเปลี่ยนแปลง)
-
 
 def init_db():
     Base.metadata.create_all(bind=engine)
