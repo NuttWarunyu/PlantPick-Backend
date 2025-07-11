@@ -37,18 +37,13 @@ def image_to_base64(img: Image.Image) -> str:
     img.save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-# === จุดแก้ไขหลัก: สร้างฟังก์ชัน resize ใหม่ที่รักษาสัดส่วน ===
 def resize_with_aspect_ratio(img: Image.Image, max_size: int = 1024) -> Image.Image:
     """
     ย่อขนาดรูปภาพโดยรักษาสัดส่วนเดิม และทำให้ขนาดหารด้วย 8 ลงตัว
     """
-    # 1. อ่านขนาดดั้งเดิม
     width, height = img.size
-    
-    # 2. คำนวณสัดส่วน
     aspect_ratio = width / height
     
-    # 3. คำนวณขนาดใหม่โดยให้ด้านที่ยาวที่สุดไม่เกิน max_size
     if width > height:
         new_width = max_size
         new_height = int(new_width / aspect_ratio)
@@ -56,7 +51,6 @@ def resize_with_aspect_ratio(img: Image.Image, max_size: int = 1024) -> Image.Im
         new_height = max_size
         new_width = int(new_height * aspect_ratio)
         
-    # 4. ปรับขนาดใหม่ให้หารด้วย 8 ลงตัว (สำคัญมากสำหรับโมเดล AI)
     new_width = new_width - (new_width % 8)
     new_height = new_height - (new_height % 8)
     
@@ -91,7 +85,6 @@ async def generate_garden(
         raise HTTPException(status_code=403, detail="Daily limit exceeded")
     try:
         image_bytes = await image.read()
-        # โมเดลเก่ายังใช้ 512x512
         image_b64 = image_to_base64(resize_with_aspect_ratio(Image.open(io.BytesIO(image_bytes)).convert("RGB"), max_size=512))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
@@ -99,9 +92,18 @@ async def generate_garden(
         "version": DEPTH_MODEL_VERSION,
         "input": { "image": f"data:image/png;base64,{image_b64}", "prompt": prompt }
     }
-    response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
-    if response.status_code != 201:
-        return JSONResponse(status_code=500, content={"error": "Replicate request failed", "details": response.text})
+    
+    # === จุดแก้ไข: เพิ่ม try-except รอบ requests.post ===
+    try:
+        response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
+        response.raise_for_status() # จะโยน HTTPError ถ้า status code เป็น 4xx หรือ 5xx
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"Replicate API request failed: {e.response.text}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Replicate request failed", "details": e.response.json() if "application/json" in e.response.headers.get("Content-Type", "") else e.response.text},
+        )
+
     prediction_data = response.json()
     prediction_id = prediction_data.get("id")
     try:
@@ -138,9 +140,7 @@ async def generate_inpainting(
         original_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         mask_image = Image.open(io.BytesIO(mask_bytes)).convert("L")
 
-        # === จุดแก้ไขที่ 2: ใช้ฟังก์ชันใหม่ในการย่อขนาดรูปภาพและ Mask ===
         resized_image = resize_with_aspect_ratio(original_image, max_size=1024)
-        # ทำให้ Mask มีขนาดเท่ากับรูปที่ย่อแล้ว
         resized_mask = mask_image.resize(resized_image.size, Image.Resampling.LANCZOS)
 
         image_b64 = image_to_base64(resized_image)
@@ -155,8 +155,21 @@ async def generate_inpainting(
             "prompt": prompt
         }
     }
-    response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
-    response.raise_for_status()
+    
+    # === จุดแก้ไข: เพิ่ม try-except รอบ requests.post ===
+    try:
+        response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"Replicate API request failed with status {e.response.status_code}: {e.response.text}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Replicate request failed",
+                "details": e.response.json() if "application/json" in e.response.headers.get("Content-Type", "") else e.response.text,
+            },
+        )
+
     prediction_data = response.json()
     prediction_id = prediction_data.get("id")
     try:
