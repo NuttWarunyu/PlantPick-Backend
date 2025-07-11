@@ -37,8 +37,31 @@ def image_to_base64(img: Image.Image) -> str:
     img.save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-def resize_image(img: Image.Image, width: int, height: int) -> Image.Image:
-    return img.resize((width, height), Image.Resampling.LANCZOS)
+# === จุดแก้ไขหลัก: สร้างฟังก์ชัน resize ใหม่ที่รักษาสัดส่วน ===
+def resize_with_aspect_ratio(img: Image.Image, max_size: int = 1024) -> Image.Image:
+    """
+    ย่อขนาดรูปภาพโดยรักษาสัดส่วนเดิม และทำให้ขนาดหารด้วย 8 ลงตัว
+    """
+    # 1. อ่านขนาดดั้งเดิม
+    width, height = img.size
+    
+    # 2. คำนวณสัดส่วน
+    aspect_ratio = width / height
+    
+    # 3. คำนวณขนาดใหม่โดยให้ด้านที่ยาวที่สุดไม่เกิน max_size
+    if width > height:
+        new_width = max_size
+        new_height = int(new_width / aspect_ratio)
+    else:
+        new_height = max_size
+        new_width = int(new_height * aspect_ratio)
+        
+    # 4. ปรับขนาดใหม่ให้หารด้วย 8 ลงตัว (สำคัญมากสำหรับโมเดล AI)
+    new_width = new_width - (new_width % 8)
+    new_height = new_height - (new_height % 8)
+    
+    logger.info(f"Resizing image from {width}x{height} to {new_width}x{new_height}")
+    return img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
 # อ่านเวอร์ชันโมเดลจาก Environment Variables
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
@@ -68,7 +91,8 @@ async def generate_garden(
         raise HTTPException(status_code=403, detail="Daily limit exceeded")
     try:
         image_bytes = await image.read()
-        image_b64 = image_to_base64(resize_image(Image.open(io.BytesIO(image_bytes)).convert("RGB"), width=512, height=512))
+        # โมเดลเก่ายังใช้ 512x512
+        image_b64 = image_to_base64(resize_with_aspect_ratio(Image.open(io.BytesIO(image_bytes)).convert("RGB"), max_size=512))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
     payload = {
@@ -89,7 +113,7 @@ async def generate_garden(
         return JSONResponse(status_code=500, content={"error": f"Database error: {str(e)}"})
     return {"status": "processing", "prediction_id": prediction_id}
 
-# === จุดแก้ไขหลัก: เพิ่ม Logging เข้าไปในทุกขั้นตอน ===
+
 @router.post("/generate-inpainting")
 async def generate_inpainting(
     image: UploadFile = File(...),
@@ -99,67 +123,57 @@ async def generate_inpainting(
     request: Request = None,
     db: Session = Depends(get_db)
 ):
-    logger.info("--- Starting /generate-inpainting ---")
+    if not INPAINT_MODEL_VERSION:
+        raise HTTPException(status_code=500, detail="REPLICATE_INPAINT_MODEL_VERSION is not set on the server.")
+    user_ip = request.client.host
+    logger.info(f"🎨 New 'Realistic Mode' request from {user_ip}")
+    key = f"ip:{user_ip}:daily_limit"
+    daily_used = int(redis_client.get(key) or 0)
+    if daily_used >= 300:
+        raise HTTPException(status_code=403, detail="Daily limit exceeded")
     try:
-        if not INPAINT_MODEL_VERSION:
-            logger.error("❌ REPLICATE_INPAINT_MODEL_VERSION is not set.")
-            raise HTTPException(status_code=500, detail="REPLICATE_INPAINT_MODEL_VERSION is not set on the server.")
-        logger.info("✅ Model version check passed.")
-
-        user_ip = request.client.host
-        logger.info(f"🎨 New 'Realistic Mode' request from {user_ip}")
-
-        key = f"ip:{user_ip}:daily_limit"
-        daily_used = int(redis_client.get(key) or 0)
-        if daily_used >= 300:
-            raise HTTPException(status_code=403, detail="Daily limit exceeded")
-        logger.info("✅ Daily limit check passed.")
-
-        logger.info("Reading image file...")
         image_bytes = await image.read()
-        logger.info("Reading mask file...")
         mask_bytes = await mask.read()
-        logger.info("✅ Files read successfully.")
-
-        logger.info("Processing original image to 1024x1024...")
-        image_b64 = image_to_base64(resize_image(Image.open(io.BytesIO(image_bytes)).convert("RGB"), width=1024, height=1024))
-        logger.info("Processing mask image to 1024x1024...")
-        mask_b64 = image_to_base64(resize_image(Image.open(io.BytesIO(mask_bytes)).convert("L"), width=1024, height=1024))
-        logger.info("✅ Image processing complete.")
-
-        payload = {
-            "version": INPAINT_MODEL_VERSION,
-            "input": {
-                "image": f"data:image/png;base64,{image_b64}",
-                "mask": f"data:image/png;base64,{mask_b64}",
-                "prompt": prompt
-            }
-        }
-        logger.info("🚀 Sending request to Replicate...")
-        response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
-        response.raise_for_status()
-        logger.info(f"✅ Replicate request successful with status code: {response.status_code}")
-
-        prediction_data = response.json()
-        prediction_id = prediction_data.get("id")
         
-        logger.info(f"💾 Saving initial history with prediction_id: {prediction_id}")
+        original_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        mask_image = Image.open(io.BytesIO(mask_bytes)).convert("L")
+
+        # === จุดแก้ไขที่ 2: ใช้ฟังก์ชันใหม่ในการย่อขนาดรูปภาพและ Mask ===
+        resized_image = resize_with_aspect_ratio(original_image, max_size=1024)
+        # ทำให้ Mask มีขนาดเท่ากับรูปที่ย่อแล้ว
+        resized_mask = mask_image.resize(resized_image.size, Image.Resampling.LANCZOS)
+
+        image_b64 = image_to_base64(resized_image)
+        mask_b64 = image_to_base64(resized_mask)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
+    payload = {
+        "version": INPAINT_MODEL_VERSION,
+        "input": {
+            "image": f"data:image/png;base64,{image_b64}",
+            "mask": f"data:image/png;base64,{mask_b64}",
+            "prompt": prompt
+        }
+    }
+    response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
+    response.raise_for_status()
+    prediction_data = response.json()
+    prediction_id = prediction_data.get("id")
+    try:
         new_request = GenerationHistory(ip=user_ip, prompt=prompt, selected_tags=selected_tags, replicate_prediction_id=prediction_id, created_at=datetime.now(), user_agent=request.headers.get("user-agent"))
         db.add(new_request)
         db.commit()
-        logger.info("✅ History saved.")
-
-        return {"status": "processing", "prediction_id": prediction_id}
-
-    except HTTPException as http_exc:
-        raise http_exc
     except Exception as e:
-        logger.error(f"💥 UNEXPECTED ERROR in /generate-inpainting: {str(e)}", exc_info=True)
-        return JSONResponse(status_code=500, content={"error": f"An unexpected error occurred: {str(e)}"})
+        db.rollback()
+        return JSONResponse(status_code=500, content={"error": f"Database error: {str(e)}"})
+    return {"status": "processing", "prediction_id": prediction_id}
 
 
+# (Endpoint /check-prediction และ /generate-bom เหมือนเดิม)
+# ...
 @router.get("/check-prediction/{prediction_id}")
 async def check_prediction(prediction_id: str = Path(...), db: Session = Depends(get_db)):
+    # ... (โค้ดส่วนนี้เหมือนเดิม)
     prediction_url = f"https://api.replicate.com/v1/predictions/{prediction_id}"
     try:
         response = requests.get(prediction_url, headers=REPLICATE_API_HEADERS)
