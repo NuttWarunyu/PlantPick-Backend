@@ -7,8 +7,10 @@ import redis
 from sqlalchemy.orm import Session
 from typing import List
 
-from app.database import SessionLocal, GenerationHistory
+# Import โมเดลและฟังก์ชันที่จำเป็นทั้งหมด
+from app.database import SessionLocal, GenerationHistory, BOMDetail
 from supabase import create_client, Client
+from .analyze_bom import analyze_bom_from_image
 from pydantic import BaseModel
 import logging
 
@@ -18,7 +20,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # (โค้ดส่วน Clients, get_db, และฟังก์ชันจัดการรูปภาพ เหมือนเดิม)
-# ...
 redis_url = os.getenv("REDIS_URL")
 if redis_url:
     redis_client = redis.from_url(redis_url)
@@ -39,7 +40,6 @@ def image_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 def resize_image(img: Image.Image, size: int = 512) -> Image.Image:
     return img.resize((size, size), Image.Resampling.LANCZOS)
-# ...
 
 # อ่านเวอร์ชันโมเดลจาก Environment Variables
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
@@ -59,14 +59,10 @@ async def generate_garden(
     request: Request = None,
     db: Session = Depends(get_db)
 ):
-    # === จุดแก้ไข: เพิ่มการตรวจสอบตัวแปร ===
     if not DEPTH_MODEL_VERSION:
         raise HTTPException(status_code=500, detail="REPLICATE_DEPTH_MODEL_VERSION is not set on the server.")
-        
     user_ip = request.client.host
     logger.info(f"🔍 New 'Inspiration Mode' request from {user_ip}")
-
-    # (โค้ดส่วนที่เหลือเหมือนเดิม)
     key = f"ip:{user_ip}:daily_limit"
     daily_used = int(redis_client.get(key) or 0)
     if daily_used >= 300:
@@ -104,14 +100,10 @@ async def generate_inpainting(
     request: Request = None,
     db: Session = Depends(get_db)
 ):
-    # === จุดแก้ไข: เพิ่มการตรวจสอบตัวแปร ===
     if not INPAINT_MODEL_VERSION:
         raise HTTPException(status_code=500, detail="REPLICATE_INPAINT_MODEL_VERSION is not set on the server.")
-
     user_ip = request.client.host
     logger.info(f"🎨 New 'Realistic Mode' request from {user_ip}")
-
-    # (โค้ดส่วนที่เหลือเหมือนเดิม)
     key = f"ip:{user_ip}:daily_limit"
     daily_used = int(redis_client.get(key) or 0)
     if daily_used >= 300:
@@ -146,8 +138,6 @@ async def generate_inpainting(
     return {"status": "processing", "prediction_id": prediction_id}
 
 
-# (Endpoint /check-prediction และ /generate-bom เหมือนเดิม)
-# ...
 @router.get("/check-prediction/{prediction_id}")
 async def check_prediction(prediction_id: str = Path(...), db: Session = Depends(get_db)):
     prediction_url = f"https://api.replicate.com/v1/predictions/{prediction_id}"
@@ -177,3 +167,60 @@ async def check_prediction(prediction_id: str = Path(...), db: Session = Depends
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
+
+
+# === Endpoint /generate-bom ที่หายไป กลับมาแล้ว! ===
+class BOMRequest(BaseModel):
+    history_id: int
+    budget: float
+    budget_level: int
+
+@router.post("/generate-bom")
+async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
+    history = db.query(GenerationHistory).filter(GenerationHistory.history_id == req.history_id).first()
+    if not history:
+        raise HTTPException(status_code=404, detail="History not found")
+
+    try:
+        history.budget_level = req.budget_level
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Could not update budget_level for history_id {req.history_id}: {e}")
+
+    try:
+        analysis_result = analyze_bom_from_image(req.history_id, history.image_url, db, budget=req.budget)
+        logger.info(f"Smart substitution analysis result: {analysis_result}")
+    except Exception as e:
+        logger.error(f"Unexpected error in BOM analysis: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": f"Unexpected error: {str(e)}"})
+
+    main_bom_items = analysis_result.get("main_bom", [])
+    suggestions = analysis_result.get("suggestions", {})
+
+    main_bom_details = [item.model_dump() for item in main_bom_items]
+    suggestions_details = suggestions
+    
+    total_cost = sum(item["estimated_cost"] for item in main_bom_details)
+
+    try:
+        for item in main_bom_items:
+            db.add(BOMDetail(
+                history_id=req.history_id,
+                material_name=f"{item.material_name} (from {item.vendor_name})",
+                quantity=item.quantity,
+                estimated_cost=item.estimated_cost,
+                affiliate_link=item.product_url or "",
+                created_at=datetime.now()
+            ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Could not save BOM history to bom_details table: {e}")
+
+    return {
+        "status": "success",
+        "total_cost": total_cost,
+        "bom_details": main_bom_details,
+        "suggestions": suggestions_details
+    }
