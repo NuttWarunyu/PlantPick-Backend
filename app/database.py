@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, 
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
+import time # <-- 1. Import time
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,20 +19,31 @@ else:
 if not DATABASE_URL:
     raise ConnectionError("Database URL is not set.")
 
-try:
-    engine = create_engine(DATABASE_URL)
-    with engine.connect() as connection:
-        connection.close()
-    print("🚀 Database connection established successfully!")
-except Exception as e:
-    print(f"❌ Failed to connect to database using URL: {DATABASE_URL}")
-    raise ConnectionError(f"Failed to connect to database: {str(e)}")
+# === จุดแก้ไขหลัก: เพิ่ม Logic การ Retry การเชื่อมต่อ ===
+MAX_RETRIES = 5
+RETRY_DELAY = 5  # วินาที
+
+for attempt in range(MAX_RETRIES):
+    try:
+        engine = create_engine(DATABASE_URL)
+        with engine.connect() as connection:
+            connection.close()
+        print(f"🚀 Database connection established successfully on attempt {attempt + 1}!")
+        break  # ออกจากลูปถ้าเชื่อมต่อสำเร็จ
+    except Exception as e:
+        print(f"⚠️ Attempt {attempt + 1}/{MAX_RETRIES}: Failed to connect to database. Retrying in {RETRY_DELAY} seconds...")
+        print(f"   Error: {e}")
+        if attempt + 1 == MAX_RETRIES:
+            print("❌ All attempts to connect to the database have failed.")
+            raise ConnectionError(f"Failed to connect to database after {MAX_RETRIES} attempts.")
+        time.sleep(RETRY_DELAY) # หน่วงเวลาก่อนลองใหม่
+# ========================================================
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# (โมเดล Material, Vendor, Product เหมือนเดิม)
-# ...
+# (โค้ดส่วน Model ที่เหลือเหมือนเดิมทั้งหมด)
+# ... (Material, Vendor, Product, etc.)
 class Material(Base):
     __tablename__ = "materials"
     id = Column(Integer, primary_key=True)
@@ -79,14 +91,12 @@ class material_relationships(Base):
     relationship_type = Column(String(100))
     notes = Column(Text)
 
-# === เพิ่ม Model ใหม่สำหรับตาราง ai_term_mappings ===
 class AITermMapping(Base):
     __tablename__ = "ai_term_mappings"
     id = Column(Integer, primary_key=True)
     ai_term = Column(String(255), nullable=False, unique=True)
     maps_to_category = Column(String(100))
     maps_to_style_tag = Column(String(100))
-# =================================================
 
 class GenerationHistory(Base):
     __tablename__ = "generation_history"
