@@ -41,7 +41,7 @@ def resize_image(img: Image.Image, size: int = 512) -> Image.Image:
     return img.resize((size, size), Image.Resampling.LANCZOS)
 # ...
 
-# === จุดแก้ไขที่ 1: อ่านเวอร์ชันโมเดลจาก Environment Variables ===
+# อ่านเวอร์ชันโมเดลจาก Environment Variables
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 DEPTH_MODEL_VERSION = os.getenv("REPLICATE_DEPTH_MODEL_VERSION")
 INPAINT_MODEL_VERSION = os.getenv("REPLICATE_INPAINT_MODEL_VERSION")
@@ -51,7 +51,6 @@ REPLICATE_API_HEADERS = {
     "Content-Type": "application/json"
 }
 
-# === จุดแก้ไขที่ 2: อัปเดต Endpoint เดิมให้ใช้ตัวแปร ===
 @router.post("/generate-garden")
 async def generate_garden(
     image: UploadFile = File(...),
@@ -60,35 +59,32 @@ async def generate_garden(
     request: Request = None,
     db: Session = Depends(get_db)
 ):
+    # === จุดแก้ไข: เพิ่มการตรวจสอบตัวแปร ===
+    if not DEPTH_MODEL_VERSION:
+        raise HTTPException(status_code=500, detail="REPLICATE_DEPTH_MODEL_VERSION is not set on the server.")
+        
     user_ip = request.client.host
     logger.info(f"🔍 New 'Inspiration Mode' request from {user_ip}")
 
-    # (โค้ดส่วนจัดการ limit เหมือนเดิม)
+    # (โค้ดส่วนที่เหลือเหมือนเดิม)
     key = f"ip:{user_ip}:daily_limit"
     daily_used = int(redis_client.get(key) or 0)
     if daily_used >= 300:
         raise HTTPException(status_code=403, detail="Daily limit exceeded")
-
     try:
         image_bytes = await image.read()
         image_b64 = image_to_base64(resize_image(Image.open(io.BytesIO(image_bytes)).convert("RGB")))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
-
     payload = {
-        "version": DEPTH_MODEL_VERSION, # <-- ใช้เวอร์ชันโมเดลจากตัวแปร
+        "version": DEPTH_MODEL_VERSION,
         "input": { "image": f"data:image/png;base64,{image_b64}", "prompt": prompt }
     }
-
     response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
     if response.status_code != 201:
         return JSONResponse(status_code=500, content={"error": "Replicate request failed", "details": response.text})
-
     prediction_data = response.json()
     prediction_id = prediction_data.get("id")
-
-    # (โค้ดส่วนบันทึกประวัติและ return prediction_id เหมือนเดิม)
-    # ...
     try:
         new_request = GenerationHistory(ip=user_ip, prompt=prompt, selected_tags=selected_tags, replicate_prediction_id=prediction_id, created_at=datetime.now(), user_agent=request.headers.get("user-agent"))
         db.add(new_request)
@@ -99,51 +95,47 @@ async def generate_garden(
     return {"status": "processing", "prediction_id": prediction_id}
 
 
-# === จุดแก้ไขที่ 3: สร้าง Endpoint ใหม่สำหรับ Inpainting ===
 @router.post("/generate-inpainting")
 async def generate_inpainting(
     image: UploadFile = File(...),
-    mask: UploadFile = File(...), # รับภาพ Mask เพิ่ม
+    mask: UploadFile = File(...),
     prompt: str = Form(...),
     selected_tags: List[str] = Form(...),
     request: Request = None,
     db: Session = Depends(get_db)
 ):
+    # === จุดแก้ไข: เพิ่มการตรวจสอบตัวแปร ===
+    if not INPAINT_MODEL_VERSION:
+        raise HTTPException(status_code=500, detail="REPLICATE_INPAINT_MODEL_VERSION is not set on the server.")
+
     user_ip = request.client.host
     logger.info(f"🎨 New 'Realistic Mode' request from {user_ip}")
 
-    # (โค้ดส่วนจัดการ limit เหมือนเดิม)
+    # (โค้ดส่วนที่เหลือเหมือนเดิม)
     key = f"ip:{user_ip}:daily_limit"
     daily_used = int(redis_client.get(key) or 0)
     if daily_used >= 300:
         raise HTTPException(status_code=403, detail="Daily limit exceeded")
-
     try:
         image_bytes = await image.read()
         mask_bytes = await mask.read()
         image_b64 = image_to_base64(resize_image(Image.open(io.BytesIO(image_bytes)).convert("RGB")))
-        mask_b64 = image_to_base64(resize_image(Image.open(io.BytesIO(mask_bytes)).convert("L"))) # Mask ควรเป็น Grayscale
+        mask_b64 = image_to_base64(resize_image(Image.open(io.BytesIO(mask_bytes)).convert("L")))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
-
     payload = {
-        "version": INPAINT_MODEL_VERSION, # <-- ใช้เวอร์ชันโมเดล Inpainting
+        "version": INPAINT_MODEL_VERSION,
         "input": {
             "image": f"data:image/png;base64,{image_b64}",
-            "mask": f"data:image/png;base64,{mask_b64}", # <-- ส่ง Mask ไปด้วย
+            "mask": f"data:image/png;base64,{mask_b64}",
             "prompt": prompt
         }
     }
-
     response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
     if response.status_code != 201:
         return JSONResponse(status_code=500, content={"error": "Replicate request failed", "details": response.text})
-
     prediction_data = response.json()
     prediction_id = prediction_data.get("id")
-
-    # (โค้ดส่วนบันทึกประวัติและ return prediction_id เหมือนเดิม)
-    # ...
     try:
         new_request = GenerationHistory(ip=user_ip, prompt=prompt, selected_tags=selected_tags, replicate_prediction_id=prediction_id, created_at=datetime.now(), user_agent=request.headers.get("user-agent"))
         db.add(new_request)
@@ -154,11 +146,10 @@ async def generate_inpainting(
     return {"status": "processing", "prediction_id": prediction_id}
 
 
-# (Endpoint /check-prediction และ /generate-bom เหมือนเดิม ไม่มีการเปลี่ยนแปลง)
+# (Endpoint /check-prediction และ /generate-bom เหมือนเดิม)
 # ...
 @router.get("/check-prediction/{prediction_id}")
 async def check_prediction(prediction_id: str = Path(...), db: Session = Depends(get_db)):
-    # ...
     prediction_url = f"https://api.replicate.com/v1/predictions/{prediction_id}"
     try:
         response = requests.get(prediction_url, headers=REPLICATE_API_HEADERS)
