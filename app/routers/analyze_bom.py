@@ -4,7 +4,6 @@ import os
 from openai import OpenAI
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-# === Import โมเดลใหม่ทั้งหมด ===
 from app.database import Material, Vendor, Product, AITermMapping
 import requests
 from PIL import Image
@@ -16,30 +15,11 @@ import re
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class BOMItem(BaseModel):
-    material_name: str
-    quantity: int
-    unit_type: str
-    vendor_name: str
-    unit_price: float
-    estimated_cost: float
-    product_url: Optional[str] = None
+    material_name: str; quantity: int; unit_type: str; vendor_name: str; unit_price: float; estimated_cost: float; product_url: Optional[str] = None
 
 def get_materials_from_image(image_b64: str) -> List[str]:
-    """ใช้ AI Vision เพื่อลิสต์ชื่อวัสดุที่เห็นในภาพ"""
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Analyze this garden image and list all visible materials like plants, stones, wood, etc. Return only a clean JSON array of strings. For example: [\"Palm Tree\", \"Paving Stone\", \"Wooden Deck\"]. Do not include any explanation."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
-                    ]
-                }
-            ],
-            max_tokens=200
-        )
+        response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": [{"type": "text", "text": "Analyze this garden image and list all visible materials like plants, stones, wood, etc. Return only a clean JSON array of strings. For example: [\"Palm Tree\", \"Paving Stone\", \"Wooden Deck\"]. Do not include any explanation."}, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}]}], max_tokens=200)
         raw_response = response.choices[0].message.content
         cleaned_response = re.sub(r"```(?:json)?|```", "", raw_response).strip()
         material_list = json.loads(cleaned_response)
@@ -50,7 +30,6 @@ def get_materials_from_image(image_b64: str) -> List[str]:
         return []
 
 def find_best_products_by_category(category: str, db: Session, limit: int = 3) -> List[Dict]:
-    """สำหรับ Category ที่กำหนด, ค้นหาสินค้าที่มีราคาถูกที่สุดตามจำนวนที่ระบุ"""
     query = (
         db.query(Product, Vendor, Material)
         .join(Vendor, Product.vendor_id == Vendor.id)
@@ -73,16 +52,7 @@ def find_best_products_by_category(category: str, db: Session, limit: int = 3) -
         for product, vendor, material in best_products
     ]
 
-# --- ฟังก์ชันหลักที่ถูกเรียกจาก API (เขียนใหม่ทั้งหมด) ---
 def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget: Optional[float] = 100000.0) -> Dict:
-    """
-    Workflow ใหม่สำหรับ Smart Substitution:
-    1. AI วิเคราะห์วัสดุ
-    2. ค้นหาแบบเจาะจงก่อน (Direct Match)
-    3. ถ้าไม่เจอ ให้ใช้ Mapping Table เพื่อหา Category
-    4. จาก Category, ดึงสินค้าที่ดีที่สุดมา 1 อย่างใส่ BOM และเก็บที่เหลือเป็นคำแนะนำ
-    5. คำนวณจำนวนและประกอบร่าง BOM สุดท้ายพร้อมคำแนะนำ
-    """
     try:
         response = requests.get(image_url)
         response.raise_for_status()
@@ -102,7 +72,6 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
     for name in ai_material_names:
         clean_name = name.strip().lower()
         
-        # 1. พยายามหาแบบเจาะจงก่อน (Direct Match)
         direct_match_query = (
             db.query(Product, Vendor, Material)
             .join(Vendor, Product.vendor_id == Vendor.id)
@@ -114,7 +83,6 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
         
         if found_product:
             product, vendor, material = found_product
-            # ป้องกันการเพิ่มของซ้ำ
             if material.material_name not in processed_specific_materials:
                 main_bom_candidates.append({
                     "material_name": material.material_name, "unit_price_thb": float(product.price_thb),
@@ -124,7 +92,6 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
                 processed_specific_materials.add(material.material_name)
             continue
 
-        # 2. ถ้าหาไม่เจอ ให้ไปหาใน "พจนานุกรม" (Mapping Table)
         mapping_query = db.query(AITermMapping).filter(func.lower(AITermMapping.ai_term) == clean_name)
         mapping = mapping_query.first()
 
@@ -133,38 +100,27 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
             best_products_in_category = find_best_products_by_category(mapping.maps_to_category, db, limit=3)
             
             if best_products_in_category:
-                # เพิ่มตัวเลือกที่ถูกที่สุดลงใน BOM หลัก
                 main_bom_candidates.append(best_products_in_category[0])
-                
-                # เก็บตัวเลือกที่เหลือเป็นคำแนะนำ
                 if len(best_products_in_category) > 1:
                     suggestion_key = f"สำหรับหมวดหมู่ '{mapping.maps_to_category}'"
                     suggestions[suggestion_key] = best_products_in_category[1:]
-                
                 processed_categories.add(mapping.maps_to_category)
     
-    # ลบรายการที่ซ้ำซ้อนออกจาก Candidate สุดท้าย
     unique_candidates = list({v['material_name']:v for v in main_bom_candidates}.values())
     print(f"🛍️ Final candidate products for BOM: {unique_candidates}")
     
     if not unique_candidates:
         return {"main_bom": default_bom_fallback(budget), "suggestions": {}}
 
-    # คำนวณจำนวนและประกอบร่าง BOM หลัก
     final_bom_data = calculate_quantities(unique_candidates, budget)
     
-    # จัดรูปแบบข้อมูลสำหรับส่งกลับ
+    # === จุดแก้ไข: ส่ง suggestions เป็น dict ธรรมดา ไม่ต้องแปลงเป็น BOMItem ===
     main_bom_result = [BOMItem(**item) for item in final_bom_data]
-    suggestions_result = {
-        key: [BOMItem(**item) for item in value]
-        for key, value in suggestions.items()
-    }
-
-    return {"main_bom": main_bom_result, "suggestions": suggestions_result}
+    
+    return {"main_bom": main_bom_result, "suggestions": suggestions}
 
 def calculate_quantities(products: List[Dict], budget: float) -> List[Dict]:
     if not products: return []
-    # ... (โค้ดส่วนนี้เหมือนเดิม)
     sorted_products = sorted(products, key=lambda x: x['unit_price_thb'])
     remaining_budget = budget
     for prod in sorted_products:

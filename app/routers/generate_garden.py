@@ -7,10 +7,9 @@ import redis
 from sqlalchemy.orm import Session
 from typing import List
 
-# Import โมเดลทั้งหมดที่เราต้องใช้
 from app.database import SessionLocal, GenerationHistory, BOMDetail
 from supabase import create_client, Client
-from .analyze_bom import analyze_bom_from_image # <-- เราจะใช้ฟังก์ชันนี้
+from .analyze_bom import analyze_bom_from_image
 from pydantic import BaseModel
 import logging
 
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# (โค้ดส่วน Clients, get_db, และฟังก์ชันจัดการรูปภาพ เหมือนเดิม)
+# (โค้ดส่วนบนทั้งหมดเหมือนเดิม)
 # ...
 redis_url = os.getenv("REDIS_URL")
 if redis_url:
@@ -46,10 +45,6 @@ REPLICATE_API_HEADERS = {
     "Authorization": f"Token {REPLICATE_API_TOKEN}",
     "Content-Type": "application/json"
 }
-# ...
-
-# (Endpoint /generate-garden และ /check-prediction เหมือนเดิม)
-# ...
 @router.post("/generate-garden")
 async def generate_garden(
     image: UploadFile = File(...),
@@ -130,14 +125,12 @@ class BOMRequest(BaseModel):
     budget: float
     budget_level: int
 
-# === จุดแก้ไขหลัก: ปรับปรุง Endpoint นี้ให้ทำงานกับข้อมูลรูปแบบใหม่ ===
 @router.post("/generate-bom")
 async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == req.history_id).first()
     if not history:
         raise HTTPException(status_code=404, detail="History not found")
 
-    # อัปเดต budget_level (เหมือนเดิม)
     try:
         history.budget_level = req.budget_level
         db.commit()
@@ -145,7 +138,6 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
         db.rollback()
         logger.error(f"Could not update budget_level for history_id {req.history_id}: {e}")
 
-    # เรียกใช้ฟังก์ชันวิเคราะห์ใหม่ ซึ่งตอนนี้จะคืนค่าเป็น Dictionary
     try:
         analysis_result = analyze_bom_from_image(req.history_id, history.image_url, db, budget=req.budget)
         logger.info(f"Smart substitution analysis result: {analysis_result}")
@@ -153,29 +145,26 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
         logger.error(f"Unexpected error in BOM analysis: {str(e)}")
         return JSONResponse(status_code=500, content={"error": f"Unexpected error: {str(e)}"})
 
-    # แยกข้อมูล BOM หลัก และ คำแนะนำ
     main_bom_items = analysis_result.get("main_bom", [])
     suggestions = analysis_result.get("suggestions", {})
 
-    # แปลงผลลัพธ์เป็น Dictionary เพื่อส่งกลับเป็น JSON
+    # === จุดแก้ไข: จัดการข้อมูลคนละประเภท ===
+    # main_bom_items เป็น List ของ Pydantic Model -> ใช้ .model_dump()
     main_bom_details = [item.model_dump() for item in main_bom_items]
-    suggestions_details = {
-        key: [item.model_dump() for item in value]
-        for key, value in suggestions.items()
-    }
     
-    # คำนวณราคารวมจาก BOM หลักเท่านั้น
+    # suggestions เป็น Dict ของ List ของ Dict ธรรมดา -> ไม่ต้องทำอะไรเลย
+    suggestions_details = suggestions
+    
     total_cost = sum(item["estimated_cost"] for item in main_bom_details)
 
-    # (Optional) บันทึก Log เฉพาะ BOM หลัก
     try:
         for item in main_bom_items:
             db.add(BOMDetail(
                 history_id=req.history_id,
-                material_name=f"{item['material_name']} (from {item['vendor_name']})",
-                quantity=item['quantity'],
-                estimated_cost=item['estimated_cost'],
-                affiliate_link=item.get('product_url', ""),
+                material_name=f"{item.material_name} (from {item.vendor_name})",
+                quantity=item.quantity,
+                estimated_cost=item.estimated_cost,
+                affiliate_link=item.product_url or "",
                 created_at=datetime.now()
             ))
         db.commit()
@@ -183,7 +172,6 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
         db.rollback()
         logger.error(f"Could not save BOM history to bom_details table: {e}")
 
-    # ส่งข้อมูลทั้งหมดกลับไปให้ Frontend
     return {
         "status": "success",
         "total_cost": total_cost,
