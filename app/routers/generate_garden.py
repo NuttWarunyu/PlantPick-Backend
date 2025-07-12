@@ -177,8 +177,62 @@ async def generate_inpainting(
     return {"status": "processing", "prediction_id": prediction_id}
 
 
-# (Endpoint /check-prediction และ /generate-bom เหมือนเดิม)
-# ...
+class BOMRequest(BaseModel):
+    history_id: int
+    budget: float
+    budget_level: int
+
+@router.post("/generate-bom")
+async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
+    history = db.query(GenerationHistory).filter(GenerationHistory.history_id == req.history_id).first()
+    if not history:
+        raise HTTPException(status_code=404, detail="History not found")
+    try:
+        history.budget_level = req.budget_level
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Could not update budget_level for history_id {req.history_id}: {e}")
+    try:
+        analysis_result = analyze_bom_from_image(req.history_id, history.image_url, db, budget=req.budget)
+        logger.info(f"Smart substitution analysis result: {analysis_result}")
+    except Exception as e:
+        logger.error(f"Unexpected error in BOM analysis: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": f"Unexpected error: {str(e)}"})
+    main_bom_items = analysis_result.get("main_bom", [])
+    suggestions = analysis_result.get("suggestions", {})
+    
+    main_bom_details = [item.model_dump() for item in main_bom_items]
+    suggestions_details = {
+        key: [item.model_dump() for item in value]
+        for key, value in suggestions.items()
+    }
+    
+    total_cost = sum(item["estimated_cost"] for item in main_bom_details)
+    
+    # === จุดแก้ไขหลัก: เปลี่ยนมาใช้ dot notation (.) ===
+    try:
+        for item in main_bom_items:
+            db.add(BOMDetail(
+                history_id=req.history_id,
+                material_name=f"{item.material_name} (from {item.vendor_name})",
+                quantity=item.quantity,
+                estimated_cost=item.estimated_cost,
+                affiliate_link=item.product_url or "",
+                created_at=datetime.now()
+            ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Could not save BOM history to bom_details table: {e}")
+
+    return {
+        "status": "success",
+        "total_cost": total_cost,
+        "bom_details": main_bom_details,
+        "suggestions": suggestions_details
+    }
+
 @router.get("/check-prediction/{prediction_id}")
 async def check_prediction(prediction_id: str = Path(...), db: Session = Depends(get_db)):
     # ... (โค้ดส่วนนี้เหมือนเดิม)
