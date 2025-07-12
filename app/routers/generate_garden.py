@@ -7,9 +7,10 @@ import redis
 from sqlalchemy.orm import Session
 from typing import List
 
+# Import โมเดลและฟังก์ชันที่จำเป็นทั้งหมด
 from app.database import SessionLocal, GenerationHistory, BOMDetail, GardenRequest
 from supabase import create_client, Client
-from .analyze_bom import analyze_bom_from_image
+from .analyze_bom import analyze_bom_from_image, BOMItem
 from pydantic import BaseModel
 import logging
 
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# (โค้ดส่วน Clients, get_db, และฟังก์ชันจัดการรูปภาพ เหมือนเดิม)
+# ...
 redis_url = os.getenv("REDIS_URL")
 if redis_url:
     redis_client = redis.from_url(redis_url)
@@ -59,6 +62,8 @@ REPLICATE_API_HEADERS = {
     "Content-Type": "application/json"
 }
 
+# (Endpoint /generate-garden และ /generate-inpainting เหมือนเดิม)
+# ...
 @router.post("/generate-garden")
 async def generate_garden(
     image: UploadFile = File(...),
@@ -84,9 +89,15 @@ async def generate_garden(
         "version": DEPTH_MODEL_VERSION,
         "input": { "image": f"data:image/png;base64,{image_b64}", "prompt": prompt }
     }
-    response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
-    if response.status_code != 201:
-        return JSONResponse(status_code=500, content={"error": "Replicate request failed", "details": response.text})
+    try:
+        response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"Replicate API request failed: {e.response.text}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Replicate request failed", "details": e.response.json() if "application/json" in e.response.headers.get("Content-Type", "") else e.response.text},
+        )
     prediction_data = response.json()
     prediction_id = prediction_data.get("id")
     try:
@@ -134,8 +145,18 @@ async def generate_inpainting(
             "prompt": prompt
         }
     }
-    response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
-    response.raise_for_status()
+    try:
+        response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"Replicate API request failed with status {e.response.status_code}: {e.response.text}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Replicate request failed",
+                "details": e.response.json() if "application/json" in e.response.headers.get("Content-Type", "") else e.response.text,
+            },
+        )
     prediction_data = response.json()
     prediction_id = prediction_data.get("id")
     try:
@@ -173,7 +194,7 @@ async def check_prediction(prediction_id: str = Path(...), db: Session = Depends
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=502, detail=f"Failed to poll Replicate: {e}")
     except Exception as e:
-        db.rollback()
+        db.rollback() 
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
 class BOMRequest(BaseModel):
@@ -203,24 +224,26 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
     main_bom_details = [item.model_dump() for item in main_bom_items]
     suggestions_details = suggestions
     total_cost = sum(item["estimated_cost"] for item in main_bom_details)
+    
+    # === จุดแก้ไขหลัก: เปลี่ยนมาใช้ dot notation (.) ===
     try:
         for item in main_bom_items:
             db.add(BOMDetail(
                 history_id=req.history_id,
                 material_name=f"{item.material_name} (from {item.vendor_name})",
-                quantity=item['quantity'],
-                estimated_cost=item['estimated_cost'],
-                affiliate_link=item.get('product_url', ""),
+                quantity=item.quantity,
+                estimated_cost=item.estimated_cost,
+                affiliate_link=item.product_url or "",
                 created_at=datetime.now()
             ))
         db.commit()
     except Exception as e:
         db.rollback()
         logger.error(f"Could not save BOM history to bom_details table: {e}")
+
     return {
         "status": "success",
         "total_cost": total_cost,
         "bom_details": main_bom_details,
         "suggestions": suggestions_details
     }
-
