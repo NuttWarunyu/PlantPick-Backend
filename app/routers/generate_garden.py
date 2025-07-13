@@ -98,12 +98,15 @@ async def generate_garden(
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
     
+    standard_negative_prompt = "blurry, low quality, cartoon, unrealistic, deformed, watermark, text, signature, ugly, distorted"
+
     payload = {
         "version": REPLICATE_MODEL_VERSION, # <-- ใช้เวอร์ชันโมเดลหลัก
         "input": {
             "image": f"data:image/png;base64,{image_b64}",
             "mask": f"data:image/png;base64,{mask_b64}",
-            "prompt": prompt
+            "prompt": prompt,
+            "negative_prompt": standard_negative_prompt 
         }
     }
     
