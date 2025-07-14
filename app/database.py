@@ -5,8 +5,10 @@ import os
 import time
 from dotenv import load_dotenv
 
+# โหลด .env ก่อนทำอย่างอื่น
 load_dotenv()
 
+# ตรวจสอบสภาพแวดล้อม (Environment)
 IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT") is not None
 
 if IS_PRODUCTION:
@@ -17,10 +19,14 @@ else:
     print("✅ Running in LOCAL mode. Using local/public database URL.")
 
 if not DATABASE_URL:
-    raise ConnectionError("Database URL is not set.")
+    raise ConnectionError(
+        "Database URL is not set. Please check your .env file and ensure "
+        "either DATABASE_URL (for production) or LOCAL_DATABASE_URL (for local) is set."
+    )
 
+# เพิ่ม Logic การ Retry การเชื่อมต่อ
 MAX_RETRIES = 5
-RETRY_DELAY = 5
+RETRY_DELAY = 5  # วินาที
 
 for attempt in range(MAX_RETRIES):
     try:
@@ -40,32 +46,28 @@ for attempt in range(MAX_RETRIES):
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# =================================================================
+# === โครงสร้างโมเดลใหม่สำหรับ Marketplace (ฉบับสมบูรณ์) ===
+# =================================================================
+
 class Material(Base):
     __tablename__ = "materials"
     id = Column(Integer, primary_key=True)
     material_name = Column(String(255), nullable=False)
     name_en = Column(String(255))
     category = Column(String(100))
+    style_tag = Column(String(100))
     description = Column(Text)
-    image_url = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
-    sun_requirement = Column(String(50))
-    water_requirement = Column(String(50))
-    is_native_th = Column(Boolean)
-    soil_type = Column(Text)
 
 class Vendor(Base):
     __tablename__ = "vendors"
     id = Column(Integer, primary_key=True)
     vendor_name = Column(String(255), nullable=False)
-    contact_person = Column(String(255))
-    phone_number = Column(String(20))
-    line_id = Column(String(100))
     location = Column(Text)
     rating = Column(Numeric(2, 1), default=0.0)
-    created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
-    delivery_areas = Column(ARRAY(Text))
     has_installation_service = Column(Boolean, default=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
 
 class Product(Base):
     __tablename__ = "products"
@@ -76,7 +78,13 @@ class Product(Base):
     unit_type = Column(String(50), nullable=False)
     product_url = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
-    # ลบ stock_quantity, is_active, size_options ออกไปแล้ว
+    # ลบคอลัมน์ที่ไม่ใช้ออกไปแล้ว เช่น stock_quantity
+
+class AITermMapping(Base):
+    __tablename__ = "ai_term_mappings"
+    id = Column(Integer, primary_key=True)
+    ai_term = Column(String(255), nullable=False, unique=True)
+    maps_to_category = Column(String(100))
 
 class material_relationships(Base):
     __tablename__ = "material_relationships"
@@ -85,12 +93,9 @@ class material_relationships(Base):
     relationship_type = Column(String(100))
     notes = Column(Text)
 
-class AITermMapping(Base):
-    __tablename__ = "ai_term_mappings"
-    id = Column(Integer, primary_key=True)
-    ai_term = Column(String(255), nullable=False, unique=True)
-    maps_to_category = Column(String(100))
-    maps_to_style_tag = Column(String(100))
+# =================================================================
+# === โมเดลเก่า (ยังคงไว้เผื่อใช้งาน) ===
+# =================================================================
 
 class GenerationHistory(Base):
     __tablename__ = "generation_history"
@@ -100,8 +105,6 @@ class GenerationHistory(Base):
     image_url = Column(String)
     prompt = Column(Text, nullable=False)
     created_at = Column(TIMESTAMP, nullable=False)
-    ddim_steps = Column(Integer, default=10)
-    user_agent = Column(String)
     selected_tags = Column(ARRAY(Text))
     budget_level = Column(Integer)
 
@@ -114,18 +117,6 @@ class BOMDetail(Base):
     estimated_cost = Column(DECIMAL(10, 2), nullable=False)
     affiliate_link = Column(String)
     created_at = Column(TIMESTAMP, nullable=False)
-
-class GardenRequest(Base):
-    __tablename__ = "garden_requests"
-    request_id = Column(Integer, primary_key=True)
-    history_id = Column(Integer, ForeignKey("generation_history.history_id"), nullable=False)
-    budget = Column(DECIMAL(10, 2), nullable=False)
-    location = Column(String, nullable=False)
-    additional_details = Column(Text)
-    status = Column(String, default="pending")
-    created_at = Column(TIMESTAMP, nullable=False)
-    fee_charged = Column(DECIMAL(10, 2), default=0.00)
-    total_cost = Column(DECIMAL(10, 2), nullable=True)
 
 def init_db():
     Base.metadata.create_all(bind=engine)
