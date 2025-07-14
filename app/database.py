@@ -5,10 +5,8 @@ import os
 import time
 from dotenv import load_dotenv
 
-# โหลด .env ก่อนทำอย่างอื่น
 load_dotenv()
 
-# ตรวจสอบสภาพแวดล้อม (Environment)
 IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT") is not None
 
 if IS_PRODUCTION:
@@ -19,14 +17,10 @@ else:
     print("✅ Running in LOCAL mode. Using local/public database URL.")
 
 if not DATABASE_URL:
-    raise ConnectionError(
-        "Database URL is not set. Please check your .env file and ensure "
-        "either DATABASE_URL (for production) or LOCAL_DATABASE_URL (for local) is set."
-    )
+    raise ConnectionError("Database URL is not set.")
 
-# เพิ่ม Logic การ Retry การเชื่อมต่อ
 MAX_RETRIES = 5
-RETRY_DELAY = 5  # วินาที
+RETRY_DELAY = 5
 
 for attempt in range(MAX_RETRIES):
     try:
@@ -47,7 +41,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # =================================================================
-# === โครงสร้างโมเดลใหม่สำหรับ Marketplace (ฉบับสมบูรณ์) ===
+# === โครงสร้างโมเดลทั้งหมดที่ถูกต้อง ===
 # =================================================================
 
 class Material(Base):
@@ -78,24 +72,12 @@ class Product(Base):
     unit_type = Column(String(50), nullable=False)
     product_url = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
-    # ลบคอลัมน์ที่ไม่ใช้ออกไปแล้ว เช่น stock_quantity
 
 class AITermMapping(Base):
     __tablename__ = "ai_term_mappings"
     id = Column(Integer, primary_key=True)
     ai_term = Column(String(255), nullable=False, unique=True)
     maps_to_category = Column(String(100))
-
-class material_relationships(Base):
-    __tablename__ = "material_relationships"
-    material_id_1 = Column(Integer, ForeignKey("materials.id"), primary_key=True)
-    material_id_2 = Column(Integer, ForeignKey("materials.id"), primary_key=True)
-    relationship_type = Column(String(100))
-    notes = Column(Text)
-
-# =================================================================
-# === โมเดลเก่า (ยังคงไว้เผื่อใช้งาน) ===
-# =================================================================
 
 class GenerationHistory(Base):
     __tablename__ = "generation_history"
@@ -117,6 +99,18 @@ class BOMDetail(Base):
     estimated_cost = Column(DECIMAL(10, 2), nullable=False)
     affiliate_link = Column(String)
     created_at = Column(TIMESTAMP, nullable=False)
+
+# === จุดแก้ไข: นำโมเดล GardenRequest ที่หายไปกลับเข้ามา ===
+class GardenRequest(Base):
+    __tablename__ = "garden_requests"
+    request_id = Column(Integer, primary_key=True)
+    history_id = Column(Integer, ForeignKey("generation_history.history_id"), nullable=False)
+    budget = Column(DECIMAL(10, 2), nullable=False)
+    location = Column(String, nullable=False)
+    additional_details = Column(Text)
+    status = Column(String, default="pending")
+    created_at = Column(TIMESTAMP, nullable=False)
+    total_cost = Column(DECIMAL(10, 2), nullable=True)
 
 def init_db():
     Base.metadata.create_all(bind=engine)
