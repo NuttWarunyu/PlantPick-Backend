@@ -68,6 +68,7 @@ REPLICATE_API_HEADERS = {
 # === จุดแก้ไขที่ 2: เปลี่ยนชื่อ Endpoint และฟังก์ชันให้เป็น /generate-garden ===
 @router.post("/generate-garden")
 async def generate_garden(
+
     image: UploadFile = File(...),
     mask: UploadFile = File(...),
     prompt: str = Form(...),
@@ -75,6 +76,11 @@ async def generate_garden(
     request: Request = None,
     db: Session = Depends(get_db)
 ):
+    
+    logger.info("🌱 generate_garden called")
+    logger.info(f"request.headers: {request.headers}")
+    logger.info(f"request.body length: {len(await request.body())}")
+    
     if not REPLICATE_MODEL_VERSION:
         raise HTTPException(status_code=500, detail="REPLICATE_MODEL_VERSION is not set on the server.")
         
