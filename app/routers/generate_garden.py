@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends, Path
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends, Path, Query
 from fastapi.responses import JSONResponse
 from PIL import Image
 import os, io, base64, time, requests
@@ -7,9 +7,11 @@ import redis
 from sqlalchemy.orm import Session
 from typing import List
 
+# === จุดแก้ไขที่ 1: Import ฟังก์ชันและโมเดลที่จำเป็นทั้งหมด ===
 from app.database import SessionLocal, GenerationHistory, BOMDetail, GardenRequest
 from supabase import create_client, Client
 from .analyze_bom import analyze_bom_from_image, BOMItem
+from .shopee import get_shopee_products # <-- Import ฟังก์ชันจาก shopee.py
 from pydantic import BaseModel
 import logging
 
@@ -18,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# (โค้ดส่วน Clients, get_db, และฟังก์ชันจัดการรูปภาพ เหมือนเดิม)
+# ... (ส่วนนี้ไม่มีการเปลี่ยนแปลง)
 redis_url = os.getenv("REDIS_URL")
 if redis_url:
     redis_client = redis.from_url(redis_url)
@@ -39,11 +43,14 @@ def resize_with_aspect_ratio(img: Image.Image, max_size: int = 1024) -> Image.Im
     new_width -= (new_width % 8); new_height -= (new_height % 8)
     logger.info(f"Resizing image from {width}x{height} to {new_width}x{new_height}")
     return img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 REPLICATE_MODEL_VERSION = os.getenv("REPLICATE_MODEL_VERSION")
 REPLICATE_API_HEADERS = {"Authorization": f"Token {REPLICATE_API_TOKEN}", "Content-Type": "application/json"}
+# ... (จบส่วนที่ไม่มีการเปลี่ยนแปลง)
 
+
+# (Endpoint /generate-garden, /check-prediction, /generate-bom เหมือนเดิม)
+# ... (ส่วนนี้ไม่มีการเปลี่ยนแปลง)
 @router.post("/generate-garden")
 async def generate_garden(image: UploadFile = File(...), mask: UploadFile = File(...), prompt: str = Form(...), selected_tags: List[str] = Form(...), request: Request = None, db: Session = Depends(get_db)):
     if not REPLICATE_MODEL_VERSION: raise HTTPException(status_code=500, detail="REPLICATE_MODEL_VERSION is not set.")
@@ -63,18 +70,8 @@ async def generate_garden(image: UploadFile = File(...), mask: UploadFile = File
         logger.error(f"Replicate API request failed: {e.response.text}"); return JSONResponse(status_code=500, content={"error": "Replicate request failed", "details": e.response.json() if "application/json" in e.response.headers.get("Content-Type", "") else e.response.text})
     prediction_id = response.json().get("id")
     try:
-        # === จุดแก้ไข: เพิ่ม user_agent กลับเข้าไปในการบันทึก ===
-        new_request = GenerationHistory(
-            ip=user_ip, 
-            prompt=prompt, 
-            selected_tags=selected_tags, 
-            replicate_prediction_id=prediction_id, 
-            created_at=datetime.now(),
-            user_agent=request.headers.get("user-agent") # <-- เพิ่มบรรทัดนี้กลับเข้ามา
-        )
-        db.add(new_request); db.commit()
-    except Exception as e:
-        db.rollback(); return JSONResponse(status_code=500, content={"error": f"Database error: {str(e)}"})
+        new_request = GenerationHistory(ip=user_ip, prompt=prompt, selected_tags=selected_tags, replicate_prediction_id=prediction_id, created_at=datetime.now(), user_agent=request.headers.get("user-agent")); db.add(new_request); db.commit()
+    except Exception as e: db.rollback(); return JSONResponse(status_code=500, content={"error": f"Database error: {str(e)}"})
     return {"status": "processing", "prediction_id": prediction_id}
 
 @router.get("/check-prediction/{prediction_id}")
@@ -117,3 +114,33 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
         db.commit()
     except Exception as e: db.rollback(); logger.error(f"Could not save BOM history to bom_details table: {e}")
     return {"status": "success", "total_cost": total_cost, "bom_details": main_bom_details, "suggestions": suggestions_details}
+# ... (จบส่วนที่ไม่มีการเปลี่ยนแปลง)
+
+
+# === จุดแก้ไขที่ 2: สร้าง Endpoint ใหม่สำหรับขอ Affiliate Link ===
+@router.get("/get-affiliate-link")
+async def get_affiliate_link(item_name: str = Query(...)):
+    """
+    รับชื่อวัสดุ แล้วไปค้นหาดีลที่ดีที่สุดจาก Shopee Affiliate API
+    """
+    logger.info(f"🔗 Affiliate link requested for: {item_name}")
+    try:
+        # เรียกใช้ฟังก์ชันเดิมที่เรามีอยู่แล้วจาก shopee.py
+        products = await get_shopee_products(keyword=item_name, page=0)
+        
+        if not products:
+            logger.warning(f"No Shopee products found for '{item_name}'. Returning generic search link.")
+            # ถ้าหาไม่เจอ ให้ส่งลิงก์ค้นหาทั่วไปแทน
+            return {"offerLink": f"https://shopee.co.th/search?keyword={item_name}"}
+            
+        # เลือกสินค้าที่ราคาถูกที่สุดมาเป็นตัวแทน
+        best_offer = min(products, key=lambda x: float(x["price"]))
+        
+        logger.info(f"Found best offer for '{item_name}': {best_offer['offerLink']}")
+        # ส่งเฉพาะ offerLink กลับไป
+        return {"offerLink": best_offer["offerLink"]}
+
+    except Exception as e:
+        logger.error(f"💥 Error getting affiliate link for '{item_name}': {e}")
+        # กรณีเกิด Error ก็ส่งลิงก์ค้นหาทั่วไปกลับไป
+        return {"offerLink": f"https://shopee.co.th/search?keyword={item_name}"}
