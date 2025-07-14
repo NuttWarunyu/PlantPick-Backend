@@ -56,7 +56,6 @@ def resize_with_aspect_ratio(img: Image.Image, max_size: int = 1024) -> Image.Im
     logger.info(f"Resizing image from {width}x{height} to {new_width}x{new_height}")
     return img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-# === จุดแก้ไขที่ 1: อ่านเวอร์ชันโมเดลหลักแค่ตัวเดียว ===
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 REPLICATE_MODEL_VERSION = os.getenv("REPLICATE_MODEL_VERSION")
 
@@ -65,10 +64,9 @@ REPLICATE_API_HEADERS = {
     "Content-Type": "application/json"
 }
 
-# === จุดแก้ไขที่ 2: เปลี่ยนชื่อ Endpoint และฟังก์ชันให้เป็น /generate-garden ===
+# === จุดแก้ไขหลัก: ลบโค้ด Debug ที่เป็นปัญหาออก และเปลี่ยนชื่อฟังก์ชันกลับ ===
 @router.post("/generate-garden")
 async def generate_garden(
-
     image: UploadFile = File(...),
     mask: UploadFile = File(...),
     prompt: str = Form(...),
@@ -76,18 +74,12 @@ async def generate_garden(
     request: Request = None,
     db: Session = Depends(get_db)
 ):
-    
-    logger.info("🌱 generate_garden called")
-    logger.info(f"request.headers: {request.headers}")
-    logger.info(f"request.body length: {len(await request.body())}")
-    
     if not REPLICATE_MODEL_VERSION:
         raise HTTPException(status_code=500, detail="REPLICATE_MODEL_VERSION is not set on the server.")
         
     user_ip = request.client.host
     logger.info(f"🎨 New Garden Generation request from {user_ip}")
     
-    # (โค้ดส่วนจัดการ limit และการประมวลผลภาพเหมือนเดิม)
     key = f"ip:{user_ip}:daily_limit"
     daily_used = int(redis_client.get(key) or 0)
     if daily_used >= 300:
@@ -107,7 +99,7 @@ async def generate_garden(
     standard_negative_prompt = "blurry, low quality, cartoon, unrealistic, deformed, watermark, text, signature, ugly, distorted"
 
     payload = {
-        "version": REPLICATE_MODEL_VERSION, # <-- ใช้เวอร์ชันโมเดลหลัก
+        "version": REPLICATE_MODEL_VERSION,
         "input": {
             "image": f"data:image/png;base64,{image_b64}",
             "mask": f"data:image/png;base64,{mask_b64}",
@@ -140,7 +132,6 @@ async def generate_garden(
 # (Endpoint /check-prediction และ /generate-bom เหมือนเดิมทุกประการ)
 @router.get("/check-prediction/{prediction_id}")
 async def check_prediction(prediction_id: str = Path(...), db: Session = Depends(get_db)):
-    # ... (โค้ดส่วนนี้เหมือนเดิม)
     prediction_url = f"https://api.replicate.com/v1/predictions/{prediction_id}"
     try:
         response = requests.get(prediction_url, headers=REPLICATE_API_HEADERS); response.raise_for_status(); poll_data = response.json(); status = poll_data.get("status")
@@ -160,7 +151,6 @@ class BOMRequest(BaseModel):
 
 @router.post("/generate-bom")
 async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
-    # ... (โค้ดส่วนนี้เหมือนเดิม)
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == req.history_id).first()
     if not history: raise HTTPException(status_code=404, detail="History not found")
     try: history.budget_level = req.budget_level; db.commit()
@@ -179,4 +169,9 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
             db.add(BOMDetail(history_id=req.history_id, material_name=f"{item.material_name} (from {item.vendor_name})", quantity=item.quantity, estimated_cost=item.estimated_cost, affiliate_link=item.product_url or "", created_at=datetime.now()))
         db.commit()
     except Exception as e: db.rollback(); logger.error(f"Could not save BOM history to bom_details table: {e}")
-    return {"status": "success", "total_cost": total_cost, "bom_details": main_bom_details, "suggestions": suggestions_details}
+    return {
+        "status": "success",
+        "total_cost": total_cost,
+        "bom_details": main_bom_details,
+        "suggestions": suggestions_details
+    }
