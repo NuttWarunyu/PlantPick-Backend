@@ -64,7 +64,6 @@ REPLICATE_API_HEADERS = {
     "Content-Type": "application/json"
 }
 
-# === จุดแก้ไขหลัก: ลบโค้ด Debug ที่เป็นปัญหาออก และเปลี่ยนชื่อฟังก์ชันกลับ ===
 @router.post("/generate-garden")
 async def generate_garden(
     image: UploadFile = File(...),
@@ -74,64 +73,79 @@ async def generate_garden(
     request: Request = None,
     db: Session = Depends(get_db)
 ):
-    if not REPLICATE_MODEL_VERSION:
-        raise HTTPException(status_code=500, detail="REPLICATE_MODEL_VERSION is not set on the server.")
-        
-    user_ip = request.client.host
-    logger.info(f"🎨 New Garden Generation request from {user_ip}")
-    
-    key = f"ip:{user_ip}:daily_limit"
-    daily_used = int(redis_client.get(key) or 0)
-    if daily_used >= 300:
-        raise HTTPException(status_code=403, detail="Daily limit exceeded")
+    logger.info("---[START] /generate-garden endpoint triggered.---")
     try:
+        if not REPLICATE_MODEL_VERSION:
+            logger.error("❌ CRITICAL: REPLICATE_MODEL_VERSION is not set.")
+            raise HTTPException(status_code=500, detail="Server configuration error: Model version is missing.")
+        logger.info(f"✅ Using model version: {REPLICATE_MODEL_VERSION}")
+
+        user_ip = request.client.host
+        logger.info(f"🎨 New request from {user_ip} with tags: {selected_tags}")
+
+        logger.info("Checking daily limit...")
+        key = f"ip:{user_ip}:daily_limit"
+        daily_used = int(redis_client.get(key) or 0)
+        if daily_used >= 300:
+            raise HTTPException(status_code=403, detail="Daily limit exceeded")
+        logger.info("✅ Daily limit check passed.")
+
+        logger.info("Reading image and mask files...")
         image_bytes = await image.read()
         mask_bytes = await mask.read()
+        logger.info("✅ Files read successfully.")
+
+        logger.info("Processing images...")
         original_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         mask_image = Image.open(io.BytesIO(mask_bytes)).convert("L")
         resized_image = resize_with_aspect_ratio(original_image, max_size=1024)
         resized_mask = mask_image.resize(resized_image.size, Image.Resampling.LANCZOS)
         image_b64 = image_to_base64(resized_image)
         mask_b64 = image_to_base64(resized_mask)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
-    
-    standard_negative_prompt = "blurry, low quality, cartoon, unrealistic, deformed, watermark, text, signature, ugly, distorted"
+        logger.info("✅ Image processing complete.")
 
-    payload = {
-        "version": REPLICATE_MODEL_VERSION,
-        "input": {
-            "image": f"data:image/png;base64,{image_b64}",
-            "mask": f"data:image/png;base64,{mask_b64}",
-            "prompt": prompt,
-            "negative_prompt": standard_negative_prompt 
+        standard_negative_prompt = "blurry, low quality, cartoon, unrealistic, deformed, watermark, text, signature, ugly, distorted"
+        payload = {
+            "version": REPLICATE_MODEL_VERSION,
+            "input": {
+                "image": f"data:image/png;base64,{image_b64}",
+                "mask": f"data:image/png;base64,{mask_b64}",
+                "prompt": prompt,
+                "negative_prompt": standard_negative_prompt
+            }
         }
-    }
-    
-    try:
+        logger.info("🚀 Sending request to Replicate API...")
+        
         response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS)
         response.raise_for_status()
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"Replicate API request failed: {e.response.text}")
-        return JSONResponse(status_code=500, content={"error": "Replicate request failed", "details": e.response.json() if "application/json" in e.response.headers.get("Content-Type", "") else e.response.text})
+        logger.info(f"✅ Replicate request successful. Status: {response.status_code}")
 
-    prediction_data = response.json()
-    prediction_id = prediction_data.get("id")
-    
-    try:
+        prediction_data = response.json()
+        prediction_id = prediction_data.get("id")
+        
+        logger.info(f"💾 Saving initial history with prediction_id: {prediction_id}")
         new_request = GenerationHistory(ip=user_ip, prompt=prompt, selected_tags=selected_tags, replicate_prediction_id=prediction_id, created_at=datetime.now(), user_agent=request.headers.get("user-agent"))
         db.add(new_request)
         db.commit()
+        logger.info("✅ History saved successfully.")
+
+        return {"status": "processing", "prediction_id": prediction_id}
+
+    except HTTPException as http_exc:
+        logger.error(f"HTTP Exception occurred: {http_exc.detail}")
+        raise http_exc
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"💥 Replicate API HTTPError: {e.response.status_code} - {e.response.text}", exc_info=True)
+        return JSONResponse(status_code=502, content={"error": "Replicate API request failed", "details": e.response.text})
     except Exception as e:
-        db.rollback()
-        return JSONResponse(status_code=500, content={"error": f"Database error: {str(e)}"})
-        
-    return {"status": "processing", "prediction_id": prediction_id}
+        logger.error(f"💥 UNEXPECTED ERROR in /generate-garden: {str(e)}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": f"An unexpected internal error occurred: {str(e)}"})
 
 
 # (Endpoint /check-prediction และ /generate-bom เหมือนเดิมทุกประการ)
 @router.get("/check-prediction/{prediction_id}")
 async def check_prediction(prediction_id: str = Path(...), db: Session = Depends(get_db)):
+    # ... (โค้ดส่วนนี้เหมือนเดิม)
     prediction_url = f"https://api.replicate.com/v1/predictions/{prediction_id}"
     try:
         response = requests.get(prediction_url, headers=REPLICATE_API_HEADERS); response.raise_for_status(); poll_data = response.json(); status = poll_data.get("status")
@@ -151,6 +165,7 @@ class BOMRequest(BaseModel):
 
 @router.post("/generate-bom")
 async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
+    # ... (โค้ดส่วนนี้เหมือนเดิม)
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == req.history_id).first()
     if not history: raise HTTPException(status_code=404, detail="History not found")
     try: history.budget_level = req.budget_level; db.commit()
