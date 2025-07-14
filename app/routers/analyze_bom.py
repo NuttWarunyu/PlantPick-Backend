@@ -40,24 +40,29 @@ def get_materials_from_image(image_b64: str) -> List[str]:
 # --- ฟังก์ชันหลักที่ถูกเรียกจาก API (เขียนใหม่ทั้งหมด) ---
 def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget: Optional[float] = 100000.0) -> Dict:
     """
-    Workflow ใหม่สำหรับ Smart Substitution ที่ใช้การจัดสรรงบประมาณตามสัดส่วน
+    Workflow ใหม่สำหรับ Smart Substitution ที่ให้ผลลัพธ์หลากหลายและมีคำแนะนำ
     """
-    
-    # === จุดแก้ไขที่ 1: กำหนด "สัดส่วนทองคำ" ในการแบ่งงบประมาณ ===
-    budget_allocation = {
-        'พรรณไม้': 0.6,       # 60% ของงบ
-        'งานฮาร์ดสเคป': 0.3, # 30% ของงบ
-        'ของตกแต่ง': 0.1      # 10% ของงบ
+    try:
+        response = requests.get(image_url)
+        response.raise_for_status()
+        image_b64 = base64.b64encode(response.content).decode("utf-8")
+    except Exception as e:
+        raise ValueError(f"Failed to load image from {image_url}: {str(e)}")
+
+    # === จุดแก้ไขที่ 1: กำหนด "สูตรสำเร็จ" หรือสัดส่วนของสวนที่ต้องการ ===
+    garden_recipe = {
+        'พรรณไม้': 8,
+        'งานฮาร์ดสเคป': 4,
+        'ของตกแต่ง': 2,
+        'ระบบ': 1
     }
     
     main_bom_candidates = []
+    suggestions = {}
     added_material_ids = set()
 
-    # วนลูปตาม "สูตรการแบ่งงบ" ที่เรากำหนด
-    for category, percentage in budget_allocation.items():
-        category_budget = budget * percentage
-        current_category_cost = 0
-        
+    # วนลูปตาม "สูตร" ที่เรากำหนด
+    for category, count in garden_recipe.items():
         # ค้นหาสินค้าทั้งหมดในหมวดหมู่นั้นๆ ที่ยังไม่ถูกเลือก
         query = (
             db.query(Product, Vendor, Material)
@@ -65,28 +70,48 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
             .join(Material, Product.material_id == Material.id)
             .filter(Material.category == category)
             .filter(Material.id.notin_(added_material_ids))
-            .order_by(func.random()) # สุ่มลำดับเพื่อให้ได้ผลลัพธ์ที่หลากหลาย
+            .order_by(func.random())
         )
         
         available_products = query.all()
         
-        # วนลูปเพื่อ "ช้อปปิ้ง" จนกว่าจะใช้งบของหมวดหมู่นี้เกือบหมด
-        for product, vendor, material in available_products:
-            product_price = float(product.price_thb)
-            if current_category_cost + product_price <= category_budget:
-                main_bom_candidates.append({
-                    "material_id": material.id,
+        if not available_products:
+            continue
+
+        # สุ่มเลือกสินค้าตามจำนวนที่ต้องการในสูตร
+        num_to_select = min(count, len(available_products))
+        selected_products_tuples = random.sample(available_products, num_to_select)
+        
+        # เพิ่มสินค้าที่สุ่มเลือกได้ลงใน BOM หลัก
+        for product, vendor, material in selected_products_tuples:
+            main_bom_candidates.append({
+                "material_id": material.id,
+                "material_name": material.material_name,
+                "category": material.category,
+                "unit_price_thb": float(product.price_thb),
+                "unit_type": product.unit_type,
+                "vendor_name": vendor.vendor_name,
+                "product_url": product.product_url
+            })
+            added_material_ids.add(material.id)
+
+        # === จุดแก้ไขที่ 2: นำสินค้าที่เหลือในหมวดหมู่นี้ไปเป็น "คำแนะนำเพิ่มเติม" ===
+        remaining_products = [p for p in available_products if p[2].id not in added_material_ids]
+        if remaining_products:
+            suggestion_key = f"ตัวเลือกเพิ่มเติมสำหรับ '{category}'"
+            suggestions[suggestion_key] = [
+                {
                     "material_name": material.material_name,
-                    "category": material.category,
-                    "unit_price_thb": product_price,
+                    "unit_price_thb": float(product.price_thb),
                     "unit_type": product.unit_type,
                     "vendor_name": vendor.vendor_name,
                     "product_url": product.product_url
-                })
-                added_material_ids.add(material.id)
-                current_category_cost += product_price
+                }
+                for product, vendor, material in remaining_products[:3] # แสดงคำแนะนำสูงสุด 3 รายการ
+            ]
 
-    print(f"🛍️ Final candidate products based on budget allocation: {main_bom_candidates}")
+
+    print(f"🛍️ Final candidate products based on recipe: {main_bom_candidates}")
     if not main_bom_candidates:
         return {"main_bom": default_bom_fallback(budget), "suggestions": {}}
 
@@ -94,8 +119,7 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
     final_bom_data = calculate_quantities(main_bom_candidates, budget)
     main_bom_result = [BOMItem(**item) for item in final_bom_data]
     
-    # สำหรับ logic ใหม่นี้ เราจะยังไม่สร้าง suggestions เพื่อความเรียบง่าย
-    return {"main_bom": main_bom_result, "suggestions": {}}
+    return {"main_bom": main_bom_result, "suggestions": suggestions}
 
 
 def calculate_quantities(products: List[Dict], budget: float) -> List[Dict]:
