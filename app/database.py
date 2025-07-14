@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, 
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
-import time # <-- 1. Import time
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,9 +19,8 @@ else:
 if not DATABASE_URL:
     raise ConnectionError("Database URL is not set.")
 
-# === จุดแก้ไขหลัก: เพิ่ม Logic การ Retry การเชื่อมต่อ ===
 MAX_RETRIES = 5
-RETRY_DELAY = 5  # วินาที
+RETRY_DELAY = 5
 
 for attempt in range(MAX_RETRIES):
     try:
@@ -29,21 +28,18 @@ for attempt in range(MAX_RETRIES):
         with engine.connect() as connection:
             connection.close()
         print(f"🚀 Database connection established successfully on attempt {attempt + 1}!")
-        break  # ออกจากลูปถ้าเชื่อมต่อสำเร็จ
+        break
     except Exception as e:
         print(f"⚠️ Attempt {attempt + 1}/{MAX_RETRIES}: Failed to connect to database. Retrying in {RETRY_DELAY} seconds...")
         print(f"   Error: {e}")
         if attempt + 1 == MAX_RETRIES:
             print("❌ All attempts to connect to the database have failed.")
             raise ConnectionError(f"Failed to connect to database after {MAX_RETRIES} attempts.")
-        time.sleep(RETRY_DELAY) # หน่วงเวลาก่อนลองใหม่
-# ========================================================
+        time.sleep(RETRY_DELAY)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# (โค้ดส่วน Model ที่เหลือเหมือนเดิมทั้งหมด)
-# ... (Material, Vendor, Product, etc.)
 class Material(Base):
     __tablename__ = "materials"
     id = Column(Integer, primary_key=True)
@@ -78,11 +74,9 @@ class Product(Base):
     vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False)
     price_thb = Column(DECIMAL(10, 2), nullable=False)
     unit_type = Column(String(50), nullable=False)
-    stock_quantity = Column(Integer, default=0)
     product_url = Column(Text)
-    is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default='now()')
-    size_options = Column(JSONB)
+    # ลบ stock_quantity, is_active, size_options ออกไปแล้ว
 
 class material_relationships(Base):
     __tablename__ = "material_relationships"
