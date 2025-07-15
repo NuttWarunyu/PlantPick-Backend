@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-import httpx # <-- 1. เปลี่ยนมาใช้ httpx
+import httpx
 import time
 import json
 import hashlib
@@ -7,35 +7,45 @@ import os
 
 router = APIRouter()
 
-# === 2. อ่านค่าจาก Environment Variables เพื่อความปลอดภัย ===
+# === CONFIG ===
 APP_ID = os.getenv("SHOPEE_APP_ID")
 SECRET = os.getenv("SHOPEE_SECRET_KEY")
 API_URL = "https://open-api.affiliate.shopee.co.th/graphql"
 
-# === 3. เปลี่ยนฟังก์ชันทั้งหมดให้เป็น async และใช้ httpx ===
+# === MAIN FUNCTION ===
 async def get_shopee_products(keyword: str, page: int = 0):
     if not APP_ID or not SECRET:
         print("❌ Shopee APP_ID or SECRET_KEY is not set on the server.")
         return []
 
+    # ✅ GraphQL Query as string (no formatting issues)
     query = """
     query Fetch($page: Int, $keyword: String) {
         productOfferV2(listType: 0, sortType: 2, page: $page, limit: 10, keyword: $keyword) {
-            nodes { commissionRate commission price productLink offerLink }
+            nodes {
+                commissionRate
+                commission
+                price
+                productLink
+                offerLink
+            }
         }
     }
-    """
-    query = ' '.join(query.split())
+    """.replace("\n", " ").strip()
 
+    # ✅ GraphQL Payload
+    variables = {
+        "page": page,
+        "keyword": keyword
+    }
     payload = {
         "query": query,
         "operationName": "Fetch",
-        "variables": { "page": page, "keyword": keyword }
+        "variables": variables
     }
 
-    # เราจะใช้ payload ที่เป็น Dictionary โดยตรงสำหรับ httpx
-    # แต่ยังคงต้องสร้าง string สำหรับ Signature
-    payload_str_for_signature = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
+    # ✅ For Signature: payload must be JSON string without spaces
+    payload_str_for_signature = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     timestamp = int(time.time())
     base_string = f"{APP_ID}{timestamp}{payload_str_for_signature}{SECRET}"
     signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
@@ -46,30 +56,27 @@ async def get_shopee_products(keyword: str, page: int = 0):
     }
 
     try:
-        # ใช้ httpx.AsyncClient() สำหรับการส่งคำขอแบบ async
         async with httpx.AsyncClient() as client:
-            # ใช้ json=payload เพื่อให้ httpx จัดการการส่งข้อมูล JSON ให้ถูกต้อง
-            response = await client.post(API_URL, json=payload, headers=headers, timeout=10.0)
-            response.raise_for_status() # จะโยน Error ถ้า status code ไม่ใช่ 2xx
-        
+            response = await client.post(API_URL, headers=headers, json=payload, timeout=10)
+            response.raise_for_status()
+
         data = response.json()
-        print(f"📦 Shopee API Response for '{keyword}': {data}")
+        print(f"📦 Shopee API Response for '{keyword}': {json.dumps(data, ensure_ascii=False, indent=2)}")
 
         if "errors" in data:
-            print(f"❌ Shopee API Error for '{keyword}': {data['errors'][0]['message']}")
+            print(f"❌ Shopee API Error: {data['errors'][0]['message']}")
             return []
-        
+
         return data.get("data", {}).get("productOfferV2", {}).get("nodes", [])
 
     except httpx.HTTPStatusError as e:
-        print(f"❌ Shopee API HTTP Status Error for '{keyword}': {e.response.status_code} - {e.response.text}")
+        print(f"❌ HTTP Error: {e.response.status_code} - {e.response.text}")
         return []
     except Exception as e:
-        print(f"❌ Shopee API Exception for '{keyword}': {str(e)}")
+        print(f"❌ Exception: {str(e)}")
         return []
 
-# (Endpoint นี้ไม่จำเป็นต้องมี ถ้าเราเรียกใช้ฟังก์ชันโดยตรงจาก router อื่น)
-# แต่จะคงไว้เผื่อคุณต้องการทดสอบโดยตรง
+# === TESTING ENDPOINT ===
 @router.post("/shopee-products")
 async def get_shopee_products_endpoint(data: dict):
     keyword = data.get("keyword", "")
