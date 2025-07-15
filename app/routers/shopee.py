@@ -16,6 +16,7 @@ async def get_shopee_products(keyword: str, page: int = 0):
         print("❌ Shopee APP_ID or SECRET_KEY is not set.")
         return []
 
+    # ✅ GraphQL query
     query = """
     query Fetch($keyword: String!, $page: Int!) {
         productOfferV2(listType: 0, sortType: 2, page: $page, limit: 10, keyword: $keyword) {
@@ -30,19 +31,19 @@ async def get_shopee_products(keyword: str, page: int = 0):
     }
     """.strip()
 
-    # ❗❗ Convert variables into string for Shopee API compatibility
+    # ✅ ส่ง variables เป็น dict (object) เท่านั้น
     variables = {
         "keyword": keyword,
         "page": page
     }
-    variables_str = json.dumps(variables, ensure_ascii=False)
 
     payload = {
         "query": query,
         "operationName": "Fetch",
-        "variables": variables_str  # 👈 Shopee API wants this as a string!
+        "variables": variables  # ✅ ต้องเป็น dict, ห้าม json.dumps
     }
 
+    # ✅ JSON แบบ compact สำหรับสร้าง signature
     payload_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     timestamp = int(time.time())
     base_string = f"{APP_ID}{timestamp}{payload_str}{SECRET}"
