@@ -33,9 +33,11 @@ async def get_shopee_products(keyword: str, page: int = 0):
         "variables": { "page": page, "keyword": keyword }
     }
 
-    payload_str = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
+    # เราจะใช้ payload ที่เป็น Dictionary โดยตรงสำหรับ httpx
+    # แต่ยังคงต้องสร้าง string สำหรับ Signature
+    payload_str_for_signature = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
     timestamp = int(time.time())
-    base_string = f"{APP_ID}{timestamp}{payload_str}{SECRET}"
+    base_string = f"{APP_ID}{timestamp}{payload_str_for_signature}{SECRET}"
     signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
 
     headers = {
@@ -46,7 +48,8 @@ async def get_shopee_products(keyword: str, page: int = 0):
     try:
         # ใช้ httpx.AsyncClient() สำหรับการส่งคำขอแบบ async
         async with httpx.AsyncClient() as client:
-            response = await client.post(API_URL, data=payload_str.encode("utf-8"), headers=headers, timeout=10.0)
+            # ใช้ json=payload เพื่อให้ httpx จัดการการส่งข้อมูล JSON ให้ถูกต้อง
+            response = await client.post(API_URL, json=payload, headers=headers, timeout=10.0)
             response.raise_for_status() # จะโยน Error ถ้า status code ไม่ใช่ 2xx
         
         data = response.json()
@@ -72,4 +75,3 @@ async def get_shopee_products_endpoint(data: dict):
     keyword = data.get("keyword", "")
     page = data.get("page", 0)
     return await get_shopee_products(keyword, page)
-
