@@ -10,3 +10,4 @@ psycopg2-binary==2.9.9  # สำหรับ PostgreSQL
 sqlalchemy==2.0.32     # สำหรับ ORM กับ PostgreSQL
 redis==5.0.1           # สำหรับจัดการลิมิต
 supabase==2.15.3
+httpx

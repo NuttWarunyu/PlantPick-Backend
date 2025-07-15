@@ -126,7 +126,7 @@ async def get_affiliate_link(item_name: str = Query(...)):
     logger.info(f"🔗 Affiliate link requested for: {item_name}")
     try:
         # เรียกใช้ฟังก์ชันเดิมที่เรามีอยู่แล้วจาก shopee.py
-        products = await get_shopee_products(keyword=item_name, page=0)
+        products = await get_shopee_products({"keyword": item_name, "page": 0})
         
         if not products:
             logger.warning(f"No Shopee products found for '{item_name}'. Returning generic search link.")
