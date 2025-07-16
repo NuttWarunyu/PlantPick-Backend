@@ -58,7 +58,7 @@ REPLICATE_API_HEADERS = {"Authorization": f"Token {REPLICATE_API_TOKEN}", "Conte
 
 # === ฟังก์ชันอัปโหลดไฟล์ไป Supabase Storage ด้วย httpx (async) ===
 async def upload_to_supabase(file_bytes: bytes, file_name: str, content_type: str = "image/png"):
-    SUPABASE_URL = "https://<project_id>.supabase.co"  # TODO: Replace <project_id> with your actual project id
+    SUPABASE_URL = "https://ejcieklcwkhrkcxcfhxx.supabase.co"
     SUPABASE_BUCKET = "generated-images"
     SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
