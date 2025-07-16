@@ -111,7 +111,13 @@ async def generate_garden(
         original_bytes = await image.read()
         # อัปโหลดภาพต้นฉบับ (ใช้ httpx)
         original_file_name = f"original/user_{int(time.time())}.png"
-        original_url = await upload_to_supabase(original_bytes, original_file_name, content_type="image/png")
+        try:
+            print("[DEBUG] Before upload_to_supabase")
+            original_url = await upload_to_supabase(original_bytes, original_file_name, content_type="image/png")
+            print("[DEBUG] After upload_to_supabase")
+        except Exception as e:
+            print(f"[DEBUG] Exception before/after upload: {e}")
+            raise
         # โหลดใหม่เป็น BytesIO เพื่อใช้กับ PIL
         original_image = Image.open(io.BytesIO(original_bytes)).convert("RGB")
         mask_image = Image.open(io.BytesIO(await mask.read())).convert("L")
