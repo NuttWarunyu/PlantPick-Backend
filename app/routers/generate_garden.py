@@ -214,6 +214,7 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
 async def get_affiliate_link(item_name: str = Query(...)):
     """
     รับชื่อวัสดุ แล้วไปค้นหาดีลที่ดีที่สุดจาก Shopee Affiliate API
+    เปลี่ยนจากเลือกสินค้าราคาถูกสุด เป็นเลือกสินค้าร้านขายดีสุด (orders/sold สูงสุด)
     """
     logger.info(f"🔗 Affiliate link requested for: {item_name}")
     try:
@@ -224,15 +225,22 @@ async def get_affiliate_link(item_name: str = Query(...)):
             logger.warning(f"No Shopee products found for '{item_name}'. Returning generic search link.")
             # ถ้าหาไม่เจอ ให้ส่งลิงก์ค้นหาทั่วไปแทน
             return {"offerLink": f"https://shopee.co.th/search?keyword={item_name}"}
-            
-        # เลือกสินค้าที่ราคาถูกที่สุดมาเป็นตัวแทน
-        best_offer = min(products, key=lambda x: float(x["price"]))
+        
+        # === เปลี่ยนตรงนี้: เลือกสินค้าที่ร้านขายดีสุด (orders/sold สูงสุด) ===
+        # สมมติว่ามี field 'orders' หรือ 'sold' ใน product ถ้าไม่มีให้เลือกอันแรก
+        if any('orders' in p for p in products):
+            best_offer = max(products, key=lambda x: int(x.get('orders', 0)))
+        elif any('sold' in p for p in products):
+            best_offer = max(products, key=lambda x: int(x.get('sold', 0)))
+        else:
+            best_offer = products[0]  # fallback ถ้าไม่มี field orders/sold
+        # === จบจุดเปลี่ยนแปลง ===
         
         logger.info(f"Found best offer for '{item_name}': {best_offer['offerLink']}")
         # ส่งเฉพาะ offerLink กลับไป
         return {"offerLink": best_offer["offerLink"]}
 
     except Exception as e:
-        logger.error(f"💥 Error getting affiliate link for '{item_name}': {e}")
+        logger.error(f"\U0001F4A5 Error getting affiliate link for '{item_name}': {e}")
         # กรณีเกิด Error ก็ส่งลิงก์ค้นหาทั่วไปกลับไป
         return {"offerLink": f"https://shopee.co.th/search?keyword={item_name}"}
