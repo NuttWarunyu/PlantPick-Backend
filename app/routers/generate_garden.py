@@ -57,12 +57,16 @@ REPLICATE_API_HEADERS = {"Authorization": f"Token {REPLICATE_API_TOKEN}", "Conte
 
 # === ฟังก์ชันอัปโหลดไฟล์ไป Supabase Storage ===
 def upload_to_supabase_storage(file_bytes, file_name, bucket="generated-images"):
+    print(f"[DEBUG] Uploading to bucket: {bucket}, file_name: {file_name}, file_bytes length: {len(file_bytes)}")
     res = supabase.storage.from_(bucket).upload(file_name, file_bytes)
+    print(f"[DEBUG] Upload response: {res}")
     error = getattr(res, "error", None)
     if error:
         print(f"Supabase upload error: {getattr(error, 'message', str(error))}")
+        print(f"Full error object: {error}")
         raise Exception(f"Upload failed: {getattr(error, 'message', str(error))}")
     public_url = supabase.storage.from_(bucket).get_public_url(file_name)
+    print(f"[DEBUG] Public URL: {public_url}")
     return public_url
 
 
