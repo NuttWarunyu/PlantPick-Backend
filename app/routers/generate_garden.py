@@ -60,6 +60,7 @@ def upload_to_supabase_storage(file_bytes, file_name, bucket="generated-images")
     res = supabase.storage.from_(bucket).upload(file_name, file_bytes)
     error = getattr(res, "error", None)
     if error:
+        print(f"Supabase upload error: {getattr(error, 'message', str(error))}")
         raise Exception(f"Upload failed: {getattr(error, 'message', str(error))}")
     public_url = supabase.storage.from_(bucket).get_public_url(file_name)
     return public_url
@@ -93,7 +94,7 @@ async def generate_garden(
     try:
         original_bytes = await image.read()
         # อัปโหลดภาพต้นฉบับ
-        original_file_name = f"original/{user_ip}_{int(time.time())}.png"
+        original_file_name = f"original/user_{int(time.time())}.png"
         original_url = upload_to_supabase_storage(original_bytes, original_file_name)
         # โหลดใหม่เป็น BytesIO เพื่อใช้กับ PIL
         original_image = Image.open(io.BytesIO(original_bytes)).convert("RGB")
