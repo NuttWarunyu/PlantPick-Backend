@@ -7,7 +7,7 @@ import redis
 from sqlalchemy.orm import Session
 from typing import List
 
-# === จุดแก้ไขที่ 1: Import ฟังก์ชันและโมเดลที่จำเป็นทั้งหมด ===
+
 from app.database import SessionLocal, GenerationHistory, BOMDetail, GardenRequest
 from supabase import create_client, Client
 from .analyze_bom import analyze_bom_from_image, BOMItem
@@ -67,7 +67,7 @@ async def generate_garden(
     if not REPLICATE_MODEL_VERSION: raise HTTPException(status_code=500, detail="REPLICATE_MODEL_VERSION is not set.")
     user_ip = request.client.host if request.client else "unknown"; logger.info(f"🎨 New Garden Generation request from {user_ip}")
     key = f"ip:{user_ip}:daily_limit"
-    value = await redis_client.get(key)
+    value = redis_client.get(key)
     if value is not None:
         if isinstance(value, bytes):
             daily_used = int(value.decode())
@@ -105,7 +105,7 @@ async def check_prediction(prediction_id: str = Path(...), db: Session = Depends
             if not history: raise HTTPException(status_code=404, detail="Original generation history not found.")
             history.image_url = poll_data["output"][1] if len(poll_data["output"]) > 1 else poll_data["output"][0]; db.commit()
             key = f"ip:{history.ip}:daily_limit"
-            value = await redis_client.get(key)
+            value = redis_client.get(key)
             if value is not None:
                 if isinstance(value, bytes):
                     daily_used = int(value.decode())
