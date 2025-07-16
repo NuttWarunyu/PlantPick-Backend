@@ -1,12 +1,15 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends, Path, Query
 from fastapi.responses import JSONResponse
 from PIL import Image
-import os, io, base64, time, requests
+import os
+import io
+import base64
+import time
+import requests
 from datetime import datetime
 import redis
 from sqlalchemy.orm import Session
 from typing import List
-
 
 from app.database import SessionLocal, GenerationHistory, BOMDetail, GardenRequest
 from supabase import create_client, Client
@@ -52,6 +55,15 @@ REPLICATE_MODEL_VERSION = os.getenv("REPLICATE_MODEL_VERSION")
 REPLICATE_API_HEADERS = {"Authorization": f"Token {REPLICATE_API_TOKEN}", "Content-Type": "application/json"}
 # ... (จบส่วนที่ไม่มีการเปลี่ยนแปลง)
 
+# === ฟังก์ชันอัปโหลดไฟล์ไป Supabase Storage ===
+def upload_to_supabase_storage(file_bytes, file_name, bucket="generated-images"):
+    res = supabase.storage.from_(bucket).upload(file_name, file_bytes)
+    error = getattr(res, "error", None)
+    if error:
+        raise Exception(f"Upload failed: {getattr(error, 'message', str(error))}")
+    public_url = supabase.storage.from_(bucket).get_public_url(file_name)
+    return public_url
+
 
 # (Endpoint /generate-garden, /check-prediction, /generate-bom เหมือนเดิม)
 # ... (ส่วนนี้ไม่มีการเปลี่ยนแปลง)
@@ -79,10 +91,19 @@ async def generate_garden(
         daily_used = 0
     if daily_used >= 300: raise HTTPException(status_code=403, detail="Daily limit exceeded")
     try:
-        original_image = Image.open(io.BytesIO(await image.read())).convert("RGB"); mask_image = Image.open(io.BytesIO(await mask.read())).convert("L")
-        resized_image = resize_with_aspect_ratio(original_image, max_size=1024); resized_mask = mask_image.resize(resized_image.size, Image.Resampling.LANCZOS)
-        image_b64 = image_to_base64(resized_image); mask_b64 = image_to_base64(resized_mask)
-    except Exception as e: return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
+        original_bytes = await image.read()
+        # อัปโหลดภาพต้นฉบับ
+        original_file_name = f"original/{user_ip}_{int(time.time())}.png"
+        original_url = upload_to_supabase_storage(original_bytes, original_file_name)
+        # โหลดใหม่เป็น BytesIO เพื่อใช้กับ PIL
+        original_image = Image.open(io.BytesIO(original_bytes)).convert("RGB")
+        mask_image = Image.open(io.BytesIO(await mask.read())).convert("L")
+        resized_image = resize_with_aspect_ratio(original_image, max_size=1024)
+        resized_mask = mask_image.resize(resized_image.size, Image.Resampling.LANCZOS)
+        image_b64 = image_to_base64(resized_image)
+        mask_b64 = image_to_base64(resized_mask)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
     standard_negative_prompt = "blurry, low quality, cartoon, unrealistic, deformed, watermark, text, signature, ugly, distorted"
     payload = {"version": REPLICATE_MODEL_VERSION, "input": {"image": f"data:image/png;base64,{image_b64}", "mask": f"data:image/png;base64,{mask_b64}", "prompt": prompt, "negative_prompt": standard_negative_prompt}}
     try:
@@ -99,11 +120,24 @@ async def generate_garden(
 async def check_prediction(prediction_id: str = Path(...), db: Session = Depends(get_db)):
     prediction_url = f"https://api.replicate.com/v1/predictions/{prediction_id}"
     try:
-        response = requests.get(prediction_url, headers=REPLICATE_API_HEADERS); response.raise_for_status(); poll_data = response.json(); status = poll_data.get("status")
+        response = requests.get(prediction_url, headers=REPLICATE_API_HEADERS); response.raise_for_status(); poll_data = response.json(); assert isinstance(poll_data, dict)
+        status = poll_data.get("status")
         if status == "succeeded":
             history = db.query(GenerationHistory).filter(GenerationHistory.replicate_prediction_id == prediction_id).first()
             if not history: raise HTTPException(status_code=404, detail="Original generation history not found.")
-            history.image_url = poll_data["output"][1] if len(poll_data["output"]) > 1 else poll_data["output"][0]; db.commit()
+            # ดาวน์โหลดภาพที่ gen เสร็จจาก replicate แล้วอัปโหลดเข้า Supabase
+            gen_url_from_replicate = poll_data["output"][1] if len(poll_data["output"]) > 1 else poll_data["output"][0]
+            try:
+                import requests
+                gen_img_response = requests.get(gen_url_from_replicate)
+                gen_img_response.raise_for_status()
+                gen_file_name = f"gen/{history.ip}_{int(time.time())}.png"
+                generated_url = upload_to_supabase_storage(gen_img_response.content, gen_file_name)
+            except Exception as e:
+                logger.error(f"Failed to upload generated image to Supabase: {e}")
+                generated_url = gen_url_from_replicate  # fallback
+            setattr(history, "image_url", generated_url)
+            db.commit()
             key = f"ip:{history.ip}:daily_limit"
             value = redis_client.get(key)
             if value is not None:
@@ -116,7 +150,7 @@ async def check_prediction(prediction_id: str = Path(...), db: Session = Depends
             else:
                 daily_used = 0
             redis_client.set(key, daily_used + 1, ex=24 * 3600)
-            return {"status": "succeeded", "result_url": history.image_url, "history_id": history.history_id}
+            return {"status": "succeeded", "result_url": generated_url, "history_id": history.history_id}
         elif status == "failed": return {"status": "failed", "error": poll_data.get("error")}
         else: return {"status": "processing"}
     except requests.exceptions.RequestException as e: raise HTTPException(status_code=502, detail=f"Failed to poll Replicate: {e}")
