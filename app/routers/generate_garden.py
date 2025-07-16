@@ -29,6 +29,10 @@ else:
     redis_client = redis.Redis(host=os.getenv("REDIS_HOST", "localhost"), port=int(os.getenv("REDIS_PORT", 6379)), db=0)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("SUPABASE_URL or SUPABASE_SERVICE_ROLE is not set in environment variables.")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def get_db():
     db = SessionLocal();
@@ -52,10 +56,27 @@ REPLICATE_API_HEADERS = {"Authorization": f"Token {REPLICATE_API_TOKEN}", "Conte
 # (Endpoint /generate-garden, /check-prediction, /generate-bom เหมือนเดิม)
 # ... (ส่วนนี้ไม่มีการเปลี่ยนแปลง)
 @router.post("/generate-garden")
-async def generate_garden(image: UploadFile = File(...), mask: UploadFile = File(...), prompt: str = Form(...), selected_tags: List[str] = Form(...), request: Request = None, db: Session = Depends(get_db)):
+async def generate_garden(
+    request: Request,
+    image: UploadFile = File(...),
+    mask: UploadFile = File(...),
+    prompt: str = Form(...),
+    selected_tags: List[str] = Form(...),
+    db: Session = Depends(get_db)
+):
     if not REPLICATE_MODEL_VERSION: raise HTTPException(status_code=500, detail="REPLICATE_MODEL_VERSION is not set.")
-    user_ip = request.client.host; logger.info(f"🎨 New Garden Generation request from {user_ip}")
-    key = f"ip:{user_ip}:daily_limit"; daily_used = int(redis_client.get(key) or 0)
+    user_ip = request.client.host if request.client else "unknown"; logger.info(f"🎨 New Garden Generation request from {user_ip}")
+    key = f"ip:{user_ip}:daily_limit"
+    value = await redis_client.get(key)
+    if value is not None:
+        if isinstance(value, bytes):
+            daily_used = int(value.decode())
+        elif isinstance(value, (int, str)):
+            daily_used = int(value)
+        else:
+            daily_used = 0
+    else:
+        daily_used = 0
     if daily_used >= 300: raise HTTPException(status_code=403, detail="Daily limit exceeded")
     try:
         original_image = Image.open(io.BytesIO(await image.read())).convert("RGB"); mask_image = Image.open(io.BytesIO(await mask.read())).convert("L")
@@ -83,7 +104,18 @@ async def check_prediction(prediction_id: str = Path(...), db: Session = Depends
             history = db.query(GenerationHistory).filter(GenerationHistory.replicate_prediction_id == prediction_id).first()
             if not history: raise HTTPException(status_code=404, detail="Original generation history not found.")
             history.image_url = poll_data["output"][1] if len(poll_data["output"]) > 1 else poll_data["output"][0]; db.commit()
-            key = f"ip:{history.ip}:daily_limit"; daily_used = int(redis_client.get(key) or 0); redis_client.set(key, daily_used + 1, ex=24 * 3600)
+            key = f"ip:{history.ip}:daily_limit"
+            value = await redis_client.get(key)
+            if value is not None:
+                if isinstance(value, bytes):
+                    daily_used = int(value.decode())
+                elif isinstance(value, (int, str)):
+                    daily_used = int(value)
+                else:
+                    daily_used = 0
+            else:
+                daily_used = 0
+            redis_client.set(key, daily_used + 1, ex=24 * 3600)
             return {"status": "succeeded", "result_url": history.image_url, "history_id": history.history_id}
         elif status == "failed": return {"status": "failed", "error": poll_data.get("error")}
         else: return {"status": "processing"}
@@ -97,10 +129,11 @@ class BOMRequest(BaseModel):
 async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
     history = db.query(GenerationHistory).filter(GenerationHistory.history_id == req.history_id).first()
     if not history: raise HTTPException(status_code=404, detail="History not found")
-    try: history.budget_level = req.budget_level; db.commit()
+    try:
+        setattr(history, "budget_level", req.budget_level)
     except Exception as e: db.rollback(); logger.error(f"Could not update budget_level for history_id {req.history_id}: {e}")
     try:
-        analysis_result = analyze_bom_from_image(req.history_id, history.image_url, db, budget=req.budget)
+        analysis_result = analyze_bom_from_image(req.history_id, history.__dict__["image_url"], db, budget=req.budget)
         logger.info(f"Smart substitution analysis result: {analysis_result}")
     except Exception as e:
         logger.error(f"Unexpected error in BOM analysis: {str(e)}"); return JSONResponse(status_code=500, content={"error": f"Unexpected error: {str(e)}"})
@@ -126,7 +159,7 @@ async def get_affiliate_link(item_name: str = Query(...)):
     logger.info(f"🔗 Affiliate link requested for: {item_name}")
     try:
         # เรียกใช้ฟังก์ชันเดิมที่เรามีอยู่แล้วจาก shopee.py
-        products = await get_shopee_products({"keyword": item_name, "page": 0})
+        products = await get_shopee_products(item_name, 0)
         
         if not products:
             logger.warning(f"No Shopee products found for '{item_name}'. Returning generic search link.")
