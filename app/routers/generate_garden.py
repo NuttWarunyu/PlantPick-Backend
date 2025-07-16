@@ -60,7 +60,10 @@ REPLICATE_API_HEADERS = {"Authorization": f"Token {REPLICATE_API_TOKEN}", "Conte
 async def upload_to_supabase(file_bytes: bytes, file_name: str, content_type: str = "image/png"):
     SUPABASE_URL = "https://ejcieklcwkhrkcxcfhxx.supabase.co"
     SUPABASE_BUCKET = "generated-images"
-    SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+
+    # ใส่ print debug ตรงนี้
+    print(f"[DEBUG] SUPABASE_KEY: {SUPABASE_KEY[:8]}...{SUPABASE_KEY[-8:]}" if SUPABASE_KEY else "[DEBUG] SUPABASE_KEY: None")
 
     upload_url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{file_name}"
 
