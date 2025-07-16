@@ -10,6 +10,7 @@ from datetime import datetime
 import redis
 from sqlalchemy.orm import Session
 from typing import List
+import httpx
 
 from app.database import SessionLocal, GenerationHistory, BOMDetail, GardenRequest
 from supabase import create_client, Client
@@ -55,22 +56,30 @@ REPLICATE_MODEL_VERSION = os.getenv("REPLICATE_MODEL_VERSION")
 REPLICATE_API_HEADERS = {"Authorization": f"Token {REPLICATE_API_TOKEN}", "Content-Type": "application/json"}
 # ... (จบส่วนที่ไม่มีการเปลี่ยนแปลง)
 
-# === ฟังก์ชันอัปโหลดไฟล์ไป Supabase Storage ===
-def upload_to_supabase_storage(file_bytes, file_name, bucket="generated-images"):
-    print(f"[DEBUG] Uploading to bucket: {bucket}, file_name: {file_name}, file_bytes length: {len(file_bytes)}")
-    res = supabase.storage.from_(bucket).upload(file_name, file_bytes)
-    print(f"[DEBUG] Upload response: {res}")
-    print(f"[DEBUG] Upload response type: {type(res)}")
-    error = getattr(res, "error", None)
-    if error:
-        print(f"Supabase upload error: {getattr(error, 'message', str(error))}")
-        print(f"Full error object: {error}")
-        raise Exception(f"Upload failed: {getattr(error, 'message', str(error))}")
-    if not error:
-        print(f"[DEBUG] No error object, raw response: {res}")
-    public_url = supabase.storage.from_(bucket).get_public_url(file_name)
-    print(f"[DEBUG] Public URL: {public_url}")
-    return public_url
+# === ฟังก์ชันอัปโหลดไฟล์ไป Supabase Storage ด้วย httpx (async) ===
+async def upload_to_supabase(file_bytes: bytes, file_name: str, content_type: str = "image/png"):
+    SUPABASE_URL = "https://<project_id>.supabase.co"  # TODO: Replace <project_id> with your actual project id
+    SUPABASE_BUCKET = "generated-images"
+    SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+    upload_url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{file_name}"
+
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": content_type,
+        "x-upsert": "true"
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(upload_url, content=file_bytes, headers=headers)
+
+    if response.status_code in [200, 201]:
+        public_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{file_name}"
+        print(f"[DEBUG] Supabase upload success: {public_url}")
+        return public_url
+    else:
+        print(f"[DEBUG] Upload failed: {response.status_code}, {response.text}")
+        raise Exception(f"Upload failed: {response.status_code}, {response.text}")
 
 
 # (Endpoint /generate-garden, /check-prediction, /generate-bom เหมือนเดิม)
@@ -100,9 +109,9 @@ async def generate_garden(
     if daily_used >= 300: raise HTTPException(status_code=403, detail="Daily limit exceeded")
     try:
         original_bytes = await image.read()
-        # อัปโหลดภาพต้นฉบับ
+        # อัปโหลดภาพต้นฉบับ (ใช้ httpx)
         original_file_name = f"original/user_{int(time.time())}.png"
-        original_url = upload_to_supabase_storage(original_bytes, original_file_name)
+        original_url = await upload_to_supabase(original_bytes, original_file_name, content_type="image/png")
         # โหลดใหม่เป็น BytesIO เพื่อใช้กับ PIL
         original_image = Image.open(io.BytesIO(original_bytes)).convert("RGB")
         mask_image = Image.open(io.BytesIO(await mask.read())).convert("L")
@@ -133,14 +142,13 @@ async def check_prediction(prediction_id: str = Path(...), db: Session = Depends
         if status == "succeeded":
             history = db.query(GenerationHistory).filter(GenerationHistory.replicate_prediction_id == prediction_id).first()
             if not history: raise HTTPException(status_code=404, detail="Original generation history not found.")
-            # ดาวน์โหลดภาพที่ gen เสร็จจาก replicate แล้วอัปโหลดเข้า Supabase
+            # ดาวน์โหลดภาพที่ gen เสร็จจาก replicate แล้วอัปโหลดเข้า Supabase (ใช้ httpx)
             gen_url_from_replicate = poll_data["output"][1] if len(poll_data["output"]) > 1 else poll_data["output"][0]
             try:
-                import requests
                 gen_img_response = requests.get(gen_url_from_replicate)
                 gen_img_response.raise_for_status()
                 gen_file_name = f"gen/{history.ip}_{int(time.time())}.png"
-                generated_url = upload_to_supabase_storage(gen_img_response.content, gen_file_name)
+                generated_url = await upload_to_supabase(gen_img_response.content, gen_file_name, content_type="image/png")
             except Exception as e:
                 logger.error(f"Failed to upload generated image to Supabase: {e}")
                 generated_url = gen_url_from_replicate  # fallback
