@@ -131,7 +131,11 @@ async def generate_garden(
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
     standard_negative_prompt = "blurry, low quality, cartoon, unrealistic, deformed, watermark, text, signature, ugly, distorted"
-    payload = {"version": REPLICATE_MODEL_VERSION, "input": {"image": f"data:image/png;base64,{image_b64}", "mask": f"data:image/png;base64,{mask_b64}", "prompt": prompt, "negative_prompt": standard_negative_prompt}}
+    # === เติม positive prompt template ===
+    base_prompt = (
+        f"{prompt}, ultra realistic, beautiful garden, professional landscape design, soft sunlight, high detail, trending on artstation"
+    )
+    payload = {"version": REPLICATE_MODEL_VERSION, "input": {"image": f"data:image/png;base64,{image_b64}", "mask": f"data:image/png;base64,{mask_b64}", "prompt": base_prompt, "negative_prompt": standard_negative_prompt}}
     try:
         response = requests.post("https://api.replicate.com/v1/predictions", json=payload, headers=REPLICATE_API_HEADERS); response.raise_for_status()
     except requests.exceptions.HTTPError as e:
