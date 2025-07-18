@@ -60,7 +60,7 @@ async def get_shopee_products(keyword: str, page: int = 0):
             response.raise_for_status()
 
         data = response.json()
-        print(f"📦 Shopee API Response for '{keyword}': {json.dumps(data, indent=2, ensure_ascii=False)}")
+        # print(f"📦 Shopee API Response for '{keyword}': {json.dumps(data, indent=2, ensure_ascii=False)}")
 
         if "errors" in data:
             print(f"❌ Shopee API Error: {data['errors'][0]['message']}")

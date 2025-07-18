@@ -158,7 +158,6 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
             if len(main_bom_candidates) < 10:
                 main_bom_candidates.append(item)
 
-    print(f"🛍️ Final candidate products based on new recipe: {main_bom_candidates}")
     if not main_bom_candidates:
         return {"main_bom": default_bom_fallback(total_budget), "suggestions": {}}
 
@@ -209,7 +208,6 @@ def calculate_quantities(products: List[Dict], budget: float) -> List[Dict]:
         prod['unit_price'] = prod['unit_price_thb']
         
     final_bom = [prod for prod in sorted_products if prod['quantity'] > 0]
-    print(f"✅ Calculated quantities with vendors: {final_bom}")
     return final_bom
 
 def default_bom_fallback(budget: Optional[float] = None) -> List[BOMItem]:
