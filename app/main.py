@@ -34,10 +34,11 @@ app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])
 app.include_router(identify.router, tags=["Identify"])
 app.include_router(search.router, tags=["Search"])
 app.include_router(generate_garden.router, prefix="/garden", tags=["Garden"])  # Add prefix
+from app.routers import analyze_garden
+app.include_router(analyze_garden.router, tags=["AnalyzeGarden"])
 
 if __name__ == "__main__":
     print("🚀 Railway is running `main.py`!")
     port = int(os.getenv("PORT", 8000))  # Ensure port is integer 
     print(f"✅ Running on port: {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
-# ... import อื่นๆ ...
