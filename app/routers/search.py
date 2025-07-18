@@ -56,7 +56,7 @@ async def search_by_name(plant_name: str = Query(..., alias="name")):
         )
 
         print("✅ API call successful")
-        result = response.choices[0].message.content.strip()
+        result = (response.choices[0].message.content or "").strip()
         print(f"Raw response from OpenAI: {result}")
 
         # Parse คำตอบจาก OpenAI

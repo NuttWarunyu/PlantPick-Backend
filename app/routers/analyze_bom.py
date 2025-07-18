@@ -93,7 +93,7 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
             query = query.filter(Product.price_thb < group["max_price"])
         if filter_extra:
             query = filter_extra(query)
-        query = query.filter(Material.id.notin_(added_material_ids)).order_by(func.random())
+        query = query.order_by(func.random())
         available_products = query.all()
         if not available_products:
             return []
@@ -120,6 +120,24 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
             total_items += 1
             if len(selected) >= group["max_count"]:
                 break
+        # --- เพิ่ม suggestions: สินค้าที่เหลือในกลุ่มนี้ (ที่ยังไม่ถูกเลือก) ---
+        remaining = [
+            (product, vendor, material)
+            for product, vendor, material in available_products
+            if material.id not in added_material_ids
+        ]
+        # แนะนำเฉพาะกลุ่ม 'ต้นไม้' (พรรณไม้) และ 'ของตกแต่ง' เท่านั้น
+        if group["category"] in ["พรรณไม้", "ของตกแต่ง"] and remaining:
+            suggestions[group["name"]] = [
+                {
+                    "material_name": material.material_name,
+                    "unit_price_thb": float(product.price_thb),
+                    "unit_type": product.unit_type,
+                    "vendor_name": vendor.vendor_name,
+                    "product_url": product.product_url
+                }
+                for product, vendor, material in remaining[:1]
+            ]
         return selected
 
     # --- ต้นไม้ ---
