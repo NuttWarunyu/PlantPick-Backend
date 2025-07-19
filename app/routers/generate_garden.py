@@ -109,7 +109,7 @@ async def generate_garden(
             daily_used = 0
     else:
         daily_used = 0
-    if daily_used >= 300: raise HTTPException(status_code=403, detail="Daily limit exceeded")
+    if daily_used >= 10: raise HTTPException(status_code=403, detail="Daily limit exceeded")
     try:
         original_bytes = await image.read()
         # อัปโหลดภาพต้นฉบับ (ใช้ httpx)
@@ -214,6 +214,33 @@ async def generate_bom(req: BOMRequest, db: Session = Depends(get_db)):
 
 
 # === จุดแก้ไขที่ 2: สร้าง Endpoint ใหม่สำหรับขอ Affiliate Link ===
+@router.get("/daily-usage")
+async def get_daily_usage(request: Request):
+    """
+    ส่งข้อมูลจำนวนครั้งที่ใช้แล้วและจำนวนครั้งที่เหลือในวันนี้
+    """
+    user_ip = request.client.host if request.client else "unknown"
+    key = f"ip:{user_ip}:daily_limit"
+    
+    value = redis_client.get(key)
+    if value is not None:
+        if isinstance(value, bytes):
+            daily_used = int(value.decode())
+        elif isinstance(value, (int, str)):
+            daily_used = int(value)
+        else:
+            daily_used = 0
+    else:
+        daily_used = 0
+    
+    daily_limit = 10  # จำนวนครั้งที่จำกัดต่อวัน
+    
+    return {
+        "used": daily_used,
+        "limit": daily_limit,
+        "remaining": daily_limit - daily_used
+    }
+
 @router.get("/get-affiliate-link")
 async def get_affiliate_link(item_name: str = Query(...)):
     """
