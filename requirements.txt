@@ -1,13 +1,29 @@
+# Core FastAPI and Server
 fastapi==0.115.0
-uvicorn==0.30.6
-requests==2.32.3
+uvicorn[standard]==0.30.6
 python-dotenv==1.0.1
 python-multipart==0.0.9
+
+# HTTP and API
+requests==2.32.3
+httpx==0.27.0
+
+# AI and ML
 openai==1.68.2
 pillow==10.4.0
 numpy==1.26.4
+
+# Database
 psycopg2-binary==2.9.9  # สำหรับ PostgreSQL
 sqlalchemy==2.0.32     # สำหรับ ORM กับ PostgreSQL
 redis==5.0.1           # สำหรับจัดการลิมิต
 supabase==2.15.3
-httpx
+
+# Performance and Monitoring
+gunicorn==21.2.0
+prometheus-client==0.20.0
+
+# Security and Validation
+pydantic==2.8.2
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4

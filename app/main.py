@@ -6,7 +6,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-app = FastAPI(title="PlantPick API")
+app = FastAPI(
+    title="PlantPick - AI จัดสวน API",
+    description="API สำหรับบริการ AI จัดสวน ออกแบบสวนในฝันด้วยปัญญาประดิษฐ์",
+    version="1.0.0",
+    contact={
+        "name": "PlantPick Support",
+        "email": "support@plantpick.ai",
+    },
+    license_info={
+        "name": "MIT",
+    },
+)
 
 # Middleware
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +29,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 origins = [
     "http://localhost:5173",  # Local development
     "https://plantpick.app",  # Frontend production domain
+    "https://plantpick.ai",   # Main domain
+    "https://www.plantpick.ai", # www subdomain
 ]
 
 app.add_middleware(
@@ -36,6 +49,39 @@ app.include_router(search.router, tags=["Search"])
 app.include_router(generate_garden.router, prefix="/garden", tags=["Garden"])  # Add prefix
 from app.routers import analyze_garden
 app.include_router(analyze_garden.router, tags=["AnalyzeGarden"])
+
+# SEO and Health Check Endpoints
+@app.get("/", tags=["SEO"])
+async def root():
+    """Root endpoint for SEO and health check"""
+    return {
+        "message": "PlantPick - AI จัดสวน API",
+        "description": "บริการ AI จัดสวน ออกแบบสวนในฝันด้วยปัญญาประดิษฐ์",
+        "version": "1.0.0",
+        "status": "healthy",
+        "services": [
+            "AI ออกแบบสวน",
+            "วิเคราะห์ภาพสวน",
+            "ประเมินงบประมาณ",
+            "ค้นหาพรรณไม้"
+        ]
+    }
+
+@app.get("/health", tags=["Health"])
+async def health_check():
+    """Health check endpoint for monitoring"""
+    return {"status": "healthy", "service": "PlantPick API"}
+
+@app.get("/robots.txt", tags=["SEO"])
+async def robots_txt():
+    """Robots.txt endpoint for search engines"""
+    return {
+        "content": """User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /private/
+Sitemap: https://plantpick.ai/sitemap.xml"""
+    }
 
 if __name__ == "__main__":
     print("🚀 Railway is running `main.py`!")
