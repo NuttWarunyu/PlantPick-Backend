@@ -56,12 +56,20 @@ async def analyze_garden(image: UploadFile = File(...)):
             max_tokens=400
         )
         raw_response = response.choices[0].message.content
-        # ลบ Markdown Syntax (```json ... ```)
+        # ลบ Markdown Syntax และ JSON syntax
         cleaned = re.sub(r"^```json\\s*|\\s*```$", "", raw_response or "", flags=re.MULTILINE).strip()
+        # ลบ quotes และ brackets ที่ไม่จำเป็น
+        cleaned = re.sub(r"^['\"]*\[|['\"]*\]$", "", cleaned).strip()
+        cleaned = re.sub(r"['\"]*,\s*['\"]*", ",", cleaned)
+        cleaned = re.sub(r"^['\"]*|['\"]*$", "", cleaned)
+        
         try:
-            suggestions = json.loads(cleaned)
+            # แยกข้อความด้วย comma และทำความสะอาด
+            suggestions = [s.strip().strip('"\'') for s in cleaned.split(',') if s.strip()]
+            # ลบข้อความที่ว่างหรือมี syntax ผิด
+            suggestions = [s for s in suggestions if s and not s.startswith('[') and not s.endswith(']')]
         except Exception:
-            suggestions = [cleaned]
+            suggestions = [cleaned] if cleaned else []
         return {"suggestions": suggestions}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)}) 
