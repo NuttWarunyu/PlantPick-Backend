@@ -70,7 +70,7 @@ def analyze_bom_from_image(history_id: int, image_url: str, db: Session, budget:
         {"name": "ดิน/ปุ๋ย", "category": "ระบบ", "budget": system_budget * 0.533, "max_count": 1},
         {"name": "ระบบรดน้ำ", "category": "ระบบ", "budget": system_budget * 0.467, "max_count": 1},
     ]
-
+    
     main_bom_candidates = []
     suggestions = {}
     added_material_ids = set()
