@@ -8,6 +8,9 @@ from PIL import Image
 from dotenv import load_dotenv
 import re
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -21,7 +24,10 @@ async def analyze_garden(image: UploadFile = File(...)):
     คืน insight/suggestions (array ของ string ภาษาไทย)
     """
     if not OPENAI_API_KEY:
+        logger.error("OPENAI_API_KEY is not set")
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY ยังไม่ถูกตั้งค่า")
+    
+    logger.info(f"OpenAI API Key check passed - Key: {OPENAI_API_KEY[:10]}...")
     try:
         # อ่านไฟล์ + ย่อขนาด
         image_bytes = await image.read()
@@ -72,4 +78,8 @@ async def analyze_garden(image: UploadFile = File(...)):
             suggestions = [cleaned] if cleaned else []
         return {"suggestions": suggestions}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)}) 
+        logger.error(f"Error in analyze_garden: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return JSONResponse(status_code=500, content={"error": f"Internal server error: {str(e)}"}) 

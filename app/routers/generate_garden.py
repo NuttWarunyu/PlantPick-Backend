@@ -96,7 +96,20 @@ async def generate_garden(
     selected_tags: List[str] = Form(...),
     db: Session = Depends(get_db)
 ):
-    if not REPLICATE_MODEL_VERSION: raise HTTPException(status_code=500, detail="REPLICATE_MODEL_VERSION is not set.")
+    # Check environment variables
+    if not REPLICATE_MODEL_VERSION:
+        logger.error("REPLICATE_MODEL_VERSION is not set")
+        raise HTTPException(status_code=500, detail="REPLICATE_MODEL_VERSION is not set.")
+    
+    if not REPLICATE_API_TOKEN:
+        logger.error("REPLICATE_API_TOKEN is not set")
+        raise HTTPException(status_code=500, detail="REPLICATE_API_TOKEN is not set.")
+    
+    if not SUPABASE_KEY:
+        logger.error("SUPABASE_KEY is not set")
+        raise HTTPException(status_code=500, detail="SUPABASE_KEY is not set.")
+    
+    logger.info(f"Environment check passed - Model: {REPLICATE_MODEL_VERSION[:10]}..., API Token: {REPLICATE_API_TOKEN[:10]}...")
     user_ip = request.client.host if request.client else "unknown"; logger.info(f"🎨 New Garden Generation request from {user_ip}")
     key = f"ip:{user_ip}:daily_limit"
     value = redis_client.get(key)
@@ -129,6 +142,10 @@ async def generate_garden(
         image_b64 = image_to_base64(resized_image)
         mask_b64 = image_to_base64(resized_mask)
     except Exception as e:
+        logger.error(f"Error in generate_garden - Image processing: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
     standard_negative_prompt = "blurry, low quality, cartoon, unrealistic, deformed, watermark, text, signature, ugly, distorted"
     # === เติม positive prompt template ===
