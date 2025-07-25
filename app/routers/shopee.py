@@ -27,7 +27,7 @@ async def get_shopee_products(keyword: str, page: int = 0):
     # ✅ GraphQL query - ใช้แบบเดียวกับที่ทำงานได้
     query = """
     {
-        productOfferV2(listType: 0, sortType: 2, page: 0, limit: 10) {
+        productOfferV2() {
             nodes {
                 productName
                 itemId
