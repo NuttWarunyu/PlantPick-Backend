@@ -14,23 +14,48 @@ SECRET = "REM67QXPPTX5G7VE3OJGHHUVYE74HAOI"
 # หรือใช้ environment variables ถ้ามี
 # APP_ID = os.getenv("SHOPEE_APP_ID") or "15394330041"
 # SECRET = os.getenv("SHOPEE_SECRET_KEY") or "REM67QXPPTX5G7VE3OJGHHUVYE74HAOI"
+# ลองใช้ API version ใหม่
 API_URL = "https://open-api.affiliate.shopee.co.th/graphql"
+# หรือลองใช้ API version ใหม่
+# API_URL = "https://open-api.affiliate.shopee.co.th/graphql/v2"
 
 async def get_shopee_products(keyword: str, page: int = 0):
     if not APP_ID or not SECRET:
         print("❌ Shopee APP_ID or SECRET_KEY is not set.")
         return []
 
-    # ✅ GraphQL query
+    # ✅ GraphQL query - ใช้แบบเดียวกับที่ทำงานได้
     query = """
-    query Fetch($keyword: String!, $page: Int!) {
+    {
         productOfferV2(listType: 0, sortType: 2, page: $page, limit: 10, keyword: $keyword) {
             nodes {
+                productName
+                itemId
                 commissionRate
                 commission
                 price
+                sales
+                imageUrl
+                shopName
                 productLink
                 offerLink
+                periodStartTime
+                periodEndTime
+                priceMin
+                priceMax
+                productCatIds
+                ratingStar
+                priceDiscountRate
+                shopId
+                shopType
+                sellerCommissionRate
+                shopeeCommissionRate
+            }
+            pageInfo {
+                page
+                limit
+                hasNextPage
+                scrollId
             }
         }
     }
@@ -44,7 +69,6 @@ async def get_shopee_products(keyword: str, page: int = 0):
 
     payload = {
         "query": query,
-        "operationName": "Fetch",
         "variables": variables  # ✅ ต้องเป็น dict, ห้าม json.dumps
     }
 
@@ -62,6 +86,30 @@ async def get_shopee_products(keyword: str, page: int = 0):
     # base_string = f"{timestamp}{APP_ID}{payload_str}{SECRET}"
     # signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
     
+    # หรือลองใช้ format แบบอื่น
+    # base_string = f"{APP_ID}{SECRET}{timestamp}{payload_str}"
+    # signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
+    
+    # หรือลองใช้ format แบบอื่น
+    # base_string = f"{APP_ID}{SECRET}{payload_str}{timestamp}"
+    # signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
+    
+    # หรือลองใช้ format แบบอื่น
+    # base_string = f"{timestamp}{APP_ID}{payload_str}{SECRET}"
+    # signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
+    
+    # หรือลองใช้ format แบบอื่น
+    # base_string = f"{APP_ID}{SECRET}{timestamp}{payload_str}"
+    # signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
+    
+    # หรือลองใช้ format แบบอื่น
+    # base_string = f"{timestamp}{APP_ID}{payload_str}{SECRET}"
+    # signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
+    
+    # หรือลองใช้ format แบบอื่น
+    # base_string = f"{APP_ID}{SECRET}{timestamp}{payload_str}"
+    # signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
+    
     # Debug log
     print(f"🔍 Debug Shopee API:")
     print(f"   APP_ID: {APP_ID}")
@@ -72,8 +120,16 @@ async def get_shopee_products(keyword: str, page: int = 0):
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"SHA256 Credential={APP_ID},Timestamp={timestamp},Signature={signature}"
+        "Authorization": f"SHA256 Credential={APP_ID},Timestamp={timestamp},Signature={signature}",
+        "User-Agent": "PlantPick-Bot/1.0"
     }
+    
+    # หรือลองใช้ format แบบอื่น
+    # headers = {
+    #     "Content-Type": "application/json",
+    #     "Authorization": f"SHA256 Credential={APP_ID},Timestamp={timestamp},Signature={signature}",
+    #     "Accept": "application/json"
+    # }
 
     try:
         async with httpx.AsyncClient() as client:
