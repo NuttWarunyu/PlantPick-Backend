@@ -31,7 +31,23 @@ async def analyze_garden(image: UploadFile = File(...)):
     try:
         # อ่านไฟล์ + ย่อขนาด
         image_bytes = await image.read()
-        img = Image.open(io.BytesIO(image_bytes))
+        
+        # ตรวจสอบว่าไฟล์ไม่ว่าง
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="ไฟล์รูปภาพว่างเปล่า")
+        
+        # ตรวจสอบ content type
+        if not image.content_type or not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail=f"ไฟล์ไม่ใช่รูปภาพ: {image.content_type}")
+        
+        logger.info(f"Processing image: {image.filename}, size: {len(image_bytes)} bytes, type: {image.content_type}")
+        
+        try:
+            img = Image.open(io.BytesIO(image_bytes))
+        except Exception as img_error:
+            logger.error(f"Failed to open image: {img_error}")
+            raise HTTPException(status_code=400, detail="ไม่สามารถเปิดไฟล์รูปภาพได้ - ไฟล์อาจเสียหายหรือไม่ใช่รูปภาพ")
+        
         img = img.resize((300, 300))
         buffered = io.BytesIO()
         img.save(buffered, format="JPEG")

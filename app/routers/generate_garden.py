@@ -124,7 +124,26 @@ async def generate_garden(
         daily_used = 0
     if daily_used >= 10: raise HTTPException(status_code=403, detail="Daily limit exceeded")
     try:
+        # ตรวจสอบไฟล์รูปภาพ
+        if not image.content_type or not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail=f"ไฟล์รูปภาพไม่ถูกต้อง: {image.content_type}")
+        
+        if not mask.content_type or not mask.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail=f"ไฟล์ mask ไม่ถูกต้อง: {mask.content_type}")
+        
         original_bytes = await image.read()
+        mask_bytes = await mask.read()
+        
+        # ตรวจสอบว่าไฟล์ไม่ว่าง
+        if not original_bytes:
+            raise HTTPException(status_code=400, detail="ไฟล์รูปภาพว่างเปล่า")
+        
+        if not mask_bytes:
+            raise HTTPException(status_code=400, detail="ไฟล์ mask ว่างเปล่า")
+        
+        logger.info(f"Processing image: {image.filename}, size: {len(original_bytes)} bytes")
+        logger.info(f"Processing mask: {mask.filename}, size: {len(mask_bytes)} bytes")
+        
         # อัปโหลดภาพต้นฉบับ (ใช้ httpx)
         original_file_name = f"original/user_{int(time.time())}.png"
         try:
@@ -134,9 +153,19 @@ async def generate_garden(
         except Exception as e:
             print(f"[DEBUG] Exception before/after upload: {e}")
             raise
+        
         # โหลดใหม่เป็น BytesIO เพื่อใช้กับ PIL
-        original_image = Image.open(io.BytesIO(original_bytes)).convert("RGB")
-        mask_image = Image.open(io.BytesIO(await mask.read())).convert("L")
+        try:
+            original_image = Image.open(io.BytesIO(original_bytes)).convert("RGB")
+        except Exception as img_error:
+            logger.error(f"Failed to open original image: {img_error}")
+            raise HTTPException(status_code=400, detail="ไม่สามารถเปิดไฟล์รูปภาพได้ - ไฟล์อาจเสียหาย")
+        
+        try:
+            mask_image = Image.open(io.BytesIO(mask_bytes)).convert("L")
+        except Exception as mask_error:
+            logger.error(f"Failed to open mask image: {mask_error}")
+            raise HTTPException(status_code=400, detail="ไม่สามารถเปิดไฟล์ mask ได้ - ไฟล์อาจเสียหาย")
         resized_image = resize_with_aspect_ratio(original_image, max_size=1024)
         resized_mask = mask_image.resize(resized_image.size, Image.Resampling.LANCZOS)
         image_b64 = image_to_base64(resized_image)
