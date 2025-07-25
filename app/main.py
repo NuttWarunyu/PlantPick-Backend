@@ -43,7 +43,7 @@ app.add_middleware(
 
 # Include Routers
 app.include_router(upload.router, prefix="/upload", tags=["Upload"])
-app.include_router(shopee.router, prefix="/shopee", tags=["Shopee"])
+app.include_router(shopee.router, tags=["Shopee"])  # ไม่มี prefix
 app.include_router(identify.router, tags=["Identify"])
 app.include_router(search.router, tags=["Search"])
 app.include_router(generate_garden.router, prefix="/garden", tags=["Garden"])  # Add prefix

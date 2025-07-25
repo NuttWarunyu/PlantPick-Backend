@@ -7,8 +7,13 @@ import os
 
 router = APIRouter()
 
-APP_ID = os.getenv("SHOPEE_APP_ID")
-SECRET = os.getenv("SHOPEE_SECRET_KEY")
+# Hardcode สำหรับทดสอบ
+APP_ID = "15394330041"
+SECRET = "REM67QXPPTX5G7VE3OJGHHUVYE74HAOI"
+
+# หรือใช้ environment variables ถ้ามี
+# APP_ID = os.getenv("SHOPEE_APP_ID") or "15394330041"
+# SECRET = os.getenv("SHOPEE_SECRET_KEY") or "REM67QXPPTX5G7VE3OJGHHUVYE74HAOI"
 API_URL = "https://open-api.affiliate.shopee.co.th/graphql"
 
 async def get_shopee_products(keyword: str, page: int = 0):
@@ -48,8 +53,14 @@ async def get_shopee_products(keyword: str, page: int = 0):
     
     # ใช้ seconds (ไม่ใช่ milliseconds) และทำให้ fresh
     timestamp = int(time.time())  # seconds
+    
+    # ลองใช้ format ใหม่
     base_string = f"{APP_ID}{timestamp}{payload_str}{SECRET}"
     signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
+    
+    # หรือลองใช้ format แบบอื่น
+    # base_string = f"{timestamp}{APP_ID}{payload_str}{SECRET}"
+    # signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
     
     # Debug log
     print(f"🔍 Debug Shopee API:")
