@@ -90,3 +90,30 @@ async def get_shopee_products_endpoint(data: dict):
     keyword = data.get("keyword", "")
     page = data.get("page", 0)
     return await get_shopee_products(keyword, page)
+
+@router.get("/test-shopee-api")
+async def test_shopee_api_endpoint():
+    """
+    ทดสอบ Shopee API เพื่อตรวจสอบ credentials
+    """
+    if not APP_ID or not SECRET:
+        return {"error": "APP_ID หรือ SECRET ไม่ถูกตั้งค่า"}
+    
+    # ทดสอบด้วย keyword ง่ายๆ
+    products = await get_shopee_products("ต้นไม้", 0)
+    
+    if products:
+        return {
+            "status": "success",
+            "message": f"พบสินค้า {len(products)} รายการ",
+            "sample_product": products[0] if products else None
+        }
+    else:
+        return {
+            "status": "error",
+            "message": "ไม่พบสินค้าหรือ API error",
+            "debug_info": {
+                "app_id": APP_ID,
+                "secret_length": len(SECRET) if SECRET else 0
+            }
+        }
