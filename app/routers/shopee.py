@@ -45,7 +45,9 @@ async def get_shopee_products(keyword: str, page: int = 0):
 
     # ✅ JSON แบบ compact สำหรับสร้าง signature
     payload_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-    timestamp = int(time.time())
+    
+    # ลองใช้ milliseconds แทน seconds
+    timestamp = int(time.time() * 1000)  # milliseconds
     base_string = f"{APP_ID}{timestamp}{payload_str}{SECRET}"
     signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
     
