@@ -117,7 +117,7 @@ async def get_shopee_products(keyword: str, page: int = 0):
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": signature,
+        "Authorization": f"Bearer {signature}",
         "X-TIMESTAMP": str(timestamp),
         "X-PARTNER-ID": APP_ID,
         "User-Agent": "PlantPick-Bot/1.0"
