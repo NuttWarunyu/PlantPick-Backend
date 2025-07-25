@@ -67,7 +67,7 @@ async def get_shopee_products(keyword: str, page: int = 0):
     }
 
     # ✅ JSON แบบ compact สำหรับสร้าง signature
-    payload_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    payload_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
     
     # ใช้ seconds (ไม่ใช่ milliseconds) และทำให้ fresh
     timestamp = int(time.time())  # seconds
