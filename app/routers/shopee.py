@@ -3,6 +3,7 @@ import httpx
 import time
 import json
 import hashlib
+import hmac
 import os
 
 router = APIRouter()
@@ -72,9 +73,12 @@ async def get_shopee_products(keyword: str, page: int = 0):
     # ใช้ seconds (ไม่ใช่ milliseconds) และทำให้ fresh
     timestamp = int(time.time())  # seconds
     
-    # ลองใช้ format ใหม่
-    base_string = f"{APP_ID}{timestamp}{payload_str}{SECRET}"
-    signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
+    # ✅ ใช้ HMAC-SHA256 แทน SHA256
+    signature = hmac.new(
+        SECRET.encode("utf-8"),
+        payload_str.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
     
     # หรือลองใช้ format แบบอื่น
     # base_string = f"{timestamp}{APP_ID}{payload_str}{SECRET}"
@@ -109,12 +113,13 @@ async def get_shopee_products(keyword: str, page: int = 0):
     print(f"   APP_ID: {APP_ID}")
     print(f"   Timestamp: {timestamp}")
     print(f"   Payload: {payload_str[:100]}...")
-    print(f"   Base String: {base_string[:50]}...")
     print(f"   Signature: {signature}")
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"SHA256 Credential={APP_ID},Timestamp={timestamp},Signature={signature}",
+        "Authorization": signature,
+        "X-TIMESTAMP": str(timestamp),
+        "X-PARTNER-ID": APP_ID,
         "User-Agent": "PlantPick-Bot/1.0"
     }
     
