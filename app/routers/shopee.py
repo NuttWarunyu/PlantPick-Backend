@@ -27,7 +27,7 @@ async def get_shopee_products(keyword: str, page: int = 0):
     # ✅ GraphQL query - ใช้แบบเดียวกับที่ทำงานได้
     query = """
     {
-        productOfferV2(listType: 0, sortType: 2, page: $page, limit: 10, keyword: $keyword) {
+        productOfferV2(listType: 0, sortType: 2, page: 0, limit: 10) {
             nodes {
                 productName
                 itemId
@@ -61,15 +61,9 @@ async def get_shopee_products(keyword: str, page: int = 0):
     }
     """.strip()
 
-    # ✅ ส่ง variables เป็น dict (object) เท่านั้น
-    variables = {
-        "keyword": keyword,
-        "page": page
-    }
-
+    # ✅ ไม่ต้องใช้ variables แล้ว
     payload = {
-        "query": query,
-        "variables": variables  # ✅ ต้องเป็น dict, ห้าม json.dumps
+        "query": query
     }
 
     # ✅ JSON แบบ compact สำหรับสร้าง signature
