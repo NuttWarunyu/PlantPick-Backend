@@ -48,6 +48,14 @@ async def get_shopee_products(keyword: str, page: int = 0):
     timestamp = int(time.time())
     base_string = f"{APP_ID}{timestamp}{payload_str}{SECRET}"
     signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
+    
+    # Debug log
+    print(f"🔍 Debug Shopee API:")
+    print(f"   APP_ID: {APP_ID}")
+    print(f"   Timestamp: {timestamp}")
+    print(f"   Payload: {payload_str[:100]}...")
+    print(f"   Base String: {base_string[:50]}...")
+    print(f"   Signature: {signature}")
 
     headers = {
         "Content-Type": "application/json",
