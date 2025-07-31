@@ -1,7 +1,7 @@
 import os
 import uvicorn
 from fastapi import FastAPI
-from app.routers import upload, shopee, identify, search, generate_garden
+from app.routers import upload, shopee, identify, search, generate_garden, plant_doctor
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -49,6 +49,7 @@ app.include_router(search.router, tags=["Search"])
 app.include_router(generate_garden.router, prefix="/garden", tags=["Garden"])  # Add prefix
 from app.routers import analyze_garden
 app.include_router(analyze_garden.router, tags=["AnalyzeGarden"])
+app.include_router(plant_doctor.router, tags=["Plant Doctor"])  # Add Plant Doctor router
 
 # SEO and Health Check Endpoints
 @app.get("/", tags=["SEO"])
@@ -61,6 +62,7 @@ async def root():
         "status": "healthy",
         "services": [
             "AI ออกแบบสวน",
+            "AI หมอต้นไม้",
             "วิเคราะห์ภาพสวน",
             "ประเมินงบประมาณ",
             "ค้นหาพรรณไม้"

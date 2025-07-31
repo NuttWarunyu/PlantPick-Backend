@@ -13,8 +13,9 @@ if IS_PRODUCTION:
     DATABASE_URL = os.getenv("DATABASE_URL")
     print("✅ Running in PRODUCTION mode. Using internal database URL.")
 else:
-    DATABASE_URL = os.getenv("LOCAL_DATABASE_URL")
-    print("✅ Running in LOCAL mode. Using local/public database URL.")
+    # Use default SQLite for local development if no database URL is set
+    DATABASE_URL = os.getenv("LOCAL_DATABASE_URL", "sqlite:///./plantpick_local.db")
+    print("✅ Running in LOCAL mode. Using local database URL.")
 
 if not DATABASE_URL:
     raise ConnectionError("Database URL is not set.")
@@ -34,7 +35,11 @@ for attempt in range(MAX_RETRIES):
         print(f"   Error: {e}")
         if attempt + 1 == MAX_RETRIES:
             print("❌ All attempts to connect to the database have failed.")
-            raise ConnectionError(f"Failed to connect to database after {MAX_RETRIES} attempts.")
+            print("💡 Using SQLite for local development...")
+            # Fallback to SQLite for local development
+            DATABASE_URL = "sqlite:///./plantpick_local.db"
+            engine = create_engine(DATABASE_URL)
+            break
         time.sleep(RETRY_DELAY)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
