@@ -9,8 +9,18 @@ import os
 router = APIRouter()
 
 # Hardcode สำหรับทดสอบ
-APP_ID = "15394330041"
-SECRET = "REM67QXPPTX5G7VE3OJGHHUVYE74HAOI"
+# APP_ID = "15394330041"
+# SECRET = "REM67QXPPTX5G7VE3OJGHHUVYE74HAOI"
+
+# ใช้ environment variables แทน
+APP_ID = os.getenv("SHOPEE_APP_ID")
+SECRET = os.getenv("SHOPEE_SECRET_KEY")
+
+# ตรวจสอบว่า credentials มีอยู่หรือไม่
+if not APP_ID or not SECRET:
+    print("❌ Shopee APP_ID or SECRET_KEY is not set in environment variables.")
+    print("💡 Please set SHOPEE_APP_ID and SHOPEE_SECRET_KEY in your .env file")
+    print("🔗 Get new credentials from: https://affiliate.shopee.co.th/")
 
 # หรือใช้ environment variables ถ้ามี
 # APP_ID = os.getenv("SHOPEE_APP_ID") or "15394330041"

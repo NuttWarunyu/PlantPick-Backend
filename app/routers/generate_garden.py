@@ -318,6 +318,6 @@ async def get_affiliate_link(item_name: str = Query(...)):
         return {"offerLink": best_offer["offerLink"]}
 
     except Exception as e:
-        logger.error(f"\U0001F4A5 Error getting affiliate link for '{item_name}': {e}")
+        logger.error(f"❌ Error getting affiliate link for '{item_name}': {e}")
         # กรณีเกิด Error ก็ส่งลิงก์ค้นหาทั่วไปกลับไป
         return {"offerLink": f"https://shopee.co.th/search?keyword={item_name}"}
