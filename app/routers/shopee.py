@@ -31,9 +31,9 @@ if not APP_ID or not SECRET:
 # APP_ID = os.getenv("SHOPEE_APP_ID") or "15394330041"
 # SECRET = os.getenv("SHOPEE_SECRET_KEY") or "REM67QXPPTX5G7VE3OJGHHUVYE74HAOI"
 # ลองใช้ API version ใหม่
-API_URL = "https://open-api.affiliate.shopee.co.th/graphql"
+# API_URL = "https://open-api.affiliate.shopee.co.th/graphql"
 # หรือลองใช้ API version ใหม่
-# API_URL = "https://open-api.affiliate.shopee.co.th/graphql/v2"
+API_URL = "https://open-api.affiliate.shopee.co.th/graphql/v2"
 
 async def get_shopee_products(keyword: str, page: int = 0):
     if not APP_ID or not SECRET:
@@ -90,11 +90,15 @@ async def get_shopee_products(keyword: str, page: int = 0):
     timestamp = int(time.time())  # seconds
     
     # ✅ ใช้ HMAC-SHA256 แทน SHA256
-    signature = hmac.new(
-        SECRET.encode("utf-8"),
-        payload_str.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
+    # signature = hmac.new(
+    #     SECRET.encode("utf-8"),
+    #     payload_str.encode("utf-8"),
+    #     hashlib.sha256
+    # ).hexdigest()
+    
+    # ลองใช้ format ใหม่
+    base_string = f"{timestamp}{APP_ID}{payload_str}{SECRET}"
+    signature = hashlib.sha256(base_string.encode("utf-8")).hexdigest()
     
     # หรือลองใช้ format แบบอื่น
     # base_string = f"{timestamp}{APP_ID}{payload_str}{SECRET}"
