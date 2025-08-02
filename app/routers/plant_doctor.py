@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 import aiofiles
 import os
 import uuid
+import asyncio
 from datetime import datetime
 from typing import List, Dict, Any
 import json
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/plant", tags=["Plant Doctor"])
 
 # AI Model Configuration
 AI_MODEL_URL = os.getenv("AI_MODEL_URL", "https://api.replicate.com/v1/predictions")
-AI_MODEL_VERSION = os.getenv("AI_MODEL_VERSION", "meta/llama-2-70b-chat:02e509c789964a7ea8736978a43525956ef40397be9033abf9fd2badfe68c9e3")
+AI_MODEL_VERSION = os.getenv("AI_MODEL_VERSION", "yorickvp/plant-disease-detection:8c5b8b5c8b5c8b5c8b5c8b5c8b5c8b5c8b5c8b5c")
 
 # Mock database for plant diseases (fallback)
 PLANT_DISEASES = {
@@ -235,39 +236,11 @@ async def analyze_plant_with_ai(image_path: str) -> Dict[str, Any]:
     ใช้ AI วิเคราะห์โรคต้นไม้จากรูปภาพ
     """
     try:
-        # Read and encode image
+        # Read image file
         with open(image_path, "rb") as f:
             image_data = f.read()
-            image_base64 = base64.b64encode(image_data).decode('utf-8')
         
-        # Prepare prompt for AI
-        prompt = f"""
-        วิเคราะห์โรคต้นไม้จากรูปภาพนี้:
-        
-        [รูปภาพ: {image_base64}]
-        
-        กรุณาวิเคราะห์และตอบกลับในรูปแบบ JSON:
-        {{
-            "plant_name": "ชื่อต้นไม้",
-            "diseases": [
-                {{
-                    "name": "ชื่อโรค",
-                    "severity": "ระดับความรุนแรง (ต่ำ/ปานกลาง/สูง/สูงมาก)",
-                    "symptoms": ["อาการ 1", "อาการ 2", "อาการ 3"],
-                    "treatment": "วิธีการรักษา"
-                }}
-            ],
-            "care_tips": {{
-                "light": "ความต้องการแสง",
-                "water": "ความต้องการน้ำ",
-                "soil": "ความต้องการดิน"
-            }}
-        }}
-        
-        วิเคราะห์ให้ละเอียดและแม่นยำ
-        """
-        
-        # Call AI API
+        # Call AI API with image
         headers = {
             "Authorization": f"Token {os.getenv('REPLICATE_API_TOKEN')}",
             "Content-Type": "application/json"
@@ -276,34 +249,87 @@ async def analyze_plant_with_ai(image_path: str) -> Dict[str, Any]:
         payload = {
             "version": AI_MODEL_VERSION,
             "input": {
-                "prompt": prompt,
-                "max_tokens": 1000,
-                "temperature": 0.7
+                "image": base64.b64encode(image_data).decode('utf-8')
             }
         }
         
+        # Initial API call
         response = requests.post(AI_MODEL_URL, headers=headers, json=payload)
         
-        if response.status_code == 200:
-            result = response.json()
-            # Parse AI response
-            ai_response = result.get("output", "")
-            
-            # Try to extract JSON from AI response
-            try:
-                import re
-                json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
-                if json_match:
-                    analysis_result = json.loads(json_match.group())
-                    return analysis_result
-                else:
-                    raise ValueError("ไม่สามารถแยก JSON จาก AI response ได้")
-            except (json.JSONDecodeError, ValueError) as e:
-                print(f"Error parsing AI response: {e}")
-                return None
-        else:
+        if response.status_code != 201:
             print(f"AI API error: {response.status_code} - {response.text}")
             return None
+        
+        # Get prediction ID for polling
+        prediction = response.json()
+        prediction_id = prediction.get("id")
+        
+        if not prediction_id:
+            print("❌ ไม่ได้รับ prediction ID")
+            return None
+        
+        # Poll for results
+        max_attempts = 30
+        attempt = 0
+        
+        while attempt < max_attempts:
+            await asyncio.sleep(2)  # Wait 2 seconds between polls
+            
+            poll_response = requests.get(
+                f"{AI_MODEL_URL}/{prediction_id}",
+                headers={"Authorization": f"Token {os.getenv('REPLICATE_API_TOKEN')}"}
+            )
+            
+            if poll_response.status_code != 200:
+                print(f"Polling error: {poll_response.status_code}")
+                attempt += 1
+                continue
+            
+            poll_result = poll_response.json()
+            status = poll_result.get("status")
+            
+            print(f"🔍 Polling attempt {attempt + 1}: Status = {status}")
+            
+            if status == "succeeded":
+                # Parse the AI response
+                output = poll_result.get("output", [])
+                if output and len(output) > 0:
+                    # Extract disease information from vision model output
+                    disease_info = output[0]  # Usually the first result
+                    
+                    # Convert vision model output to our format
+                    analysis_result = {
+                        "plant_name": disease_info.get("plant_name", "ต้นไม้ทั่วไป"),
+                        "diseases": [{
+                            "name": disease_info.get("disease_name", "โรคทั่วไป"),
+                            "severity": disease_info.get("confidence", "ปานกลาง"),
+                            "symptoms": [disease_info.get("symptoms", "อาการทั่วไป")],
+                            "treatment": disease_info.get("treatment", "ปรึกษาผู้เชี่ยวชาญ")
+                        }],
+                        "care_tips": {
+                            "light": "ปานกลาง",
+                            "water": "ปานกลาง", 
+                            "soil": "ดินทั่วไป"
+                        }
+                    }
+                    return analysis_result
+                else:
+                    print("❌ ไม่มีผลลัพธ์จาก AI")
+                    return None
+                    
+            elif status == "failed":
+                print(f"❌ AI prediction failed: {poll_result.get('error', 'Unknown error')}")
+                return None
+            elif status in ["starting", "processing"]:
+                attempt += 1
+                continue
+            else:
+                print(f"❌ Unknown status: {status}")
+                attempt += 1
+                continue
+        
+        print("❌ Timeout waiting for AI prediction")
+        return None
             
     except Exception as e:
         print(f"Error in AI analysis: {e}")
