@@ -21,6 +21,11 @@ if not APP_ID or not SECRET:
     print("❌ Shopee APP_ID or SECRET_KEY is not set in environment variables.")
     print("💡 Please set SHOPEE_APP_ID and SHOPEE_SECRET_KEY in your .env file")
     print("🔗 Get new credentials from: https://affiliate.shopee.co.th/")
+    print("⚠️ Using fallback: returning generic search links only")
+    
+    # Fallback: ส่งค่าว่างเพื่อให้ใช้ generic search links
+    APP_ID = None
+    SECRET = None
 
 # หรือใช้ environment variables ถ้ามี
 # APP_ID = os.getenv("SHOPEE_APP_ID") or "15394330041"
@@ -33,6 +38,7 @@ API_URL = "https://open-api.affiliate.shopee.co.th/graphql"
 async def get_shopee_products(keyword: str, page: int = 0):
     if not APP_ID or not SECRET:
         print("❌ Shopee APP_ID or SECRET_KEY is not set.")
+        print("💡 Returning empty array - will use generic search links")
         return []
 
     # ✅ GraphQL query - ใช้แบบเดียวกับที่ทำงานได้
@@ -124,6 +130,10 @@ async def get_shopee_products(keyword: str, page: int = 0):
     print(f"   Timestamp: {timestamp}")
     print(f"   Payload: {payload_str[:100]}...")
     print(f"   Signature: {signature}")
+    
+    if not APP_ID or not SECRET:
+        print("⚠️ Skipping API call - no valid credentials")
+        return []
 
     headers = {
         "Content-Type": "application/json",
