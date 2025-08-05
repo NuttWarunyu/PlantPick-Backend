@@ -176,10 +176,13 @@ async def generate_garden(
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"error": f"Image processing error: {str(e)}"})
-    standard_negative_prompt = "blurry, low quality, cartoon, unrealistic, deformed, watermark, text, signature, ugly, distorted"
+    standard_negative_prompt = "blurry, low quality, cartoon, unrealistic, deformed, watermark, text, signature, ugly, distorted, empty space, blank areas, white space, unused areas"
     # === เติม positive prompt template ===
     base_prompt = (
-        f"{prompt}, ultra realistic, beautiful garden, professional landscape design, soft sunlight, high detail, trending on artstation"
+        f"{prompt}, ultra realistic, beautiful garden, professional landscape design, soft sunlight, high detail, trending on artstation, "
+        f"fill empty spaces with garden elements, transform blank areas into lush garden design, "
+        f"every white/empty area becomes part of the garden landscape, "
+        f"complete garden transformation of all available space"
     )
     payload = {"version": REPLICATE_MODEL_VERSION, "input": {"image": f"data:image/png;base64,{image_b64}", "mask": f"data:image/png;base64,{mask_b64}", "prompt": base_prompt, "negative_prompt": standard_negative_prompt}}
     try:
