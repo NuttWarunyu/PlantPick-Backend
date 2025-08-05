@@ -1,7 +1,7 @@
 import os
 import uvicorn
 from fastapi import FastAPI
-from app.routers import upload, shopee, identify, search, generate_garden, plant_doctor, admin
+from app.routers import upload, shopee, identify, search, generate_garden, plant_doctor, admin, reviews
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -51,6 +51,7 @@ from app.routers import analyze_garden
 app.include_router(analyze_garden.router, tags=["AnalyzeGarden"])
 app.include_router(plant_doctor.router, tags=["Plant Doctor"])  # Add Plant Doctor router
 app.include_router(admin.router, prefix="/admin", tags=["Admin"])  # Add Admin router
+app.include_router(reviews.router, prefix="/reviews", tags=["Reviews"])  # Add Reviews router
 
 # SEO and Health Check Endpoints
 @app.get("/", tags=["SEO"])
