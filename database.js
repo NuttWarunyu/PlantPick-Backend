@@ -20,7 +20,14 @@ const db = {
   // Plants
   async getPlants() {
     const query = `
-      SELECT p.*, 
+      SELECT p.id,
+             p.name,
+             p.scientific_name as "scientificName",
+             p.category,
+             p.plant_type as "plantType",
+             p.measurement_type as "measurementType",
+             p.created_at as "createdAt",
+             p.updated_at as "updatedAt",
              COALESCE(
                json_agg(
                  json_build_object(
@@ -37,7 +44,7 @@ const db = {
              ) as suppliers
       FROM plants p
       LEFT JOIN suppliers s ON p.id = s.plant_id
-      GROUP BY p.id
+      GROUP BY p.id, p.name, p.scientific_name, p.category, p.plant_type, p.measurement_type, p.created_at, p.updated_at
       ORDER BY p.name
     `;
     const result = await pool.query(query);
@@ -49,7 +56,14 @@ const db = {
 
   async getPlantById(id) {
     const query = `
-      SELECT p.*, 
+      SELECT p.id,
+             p.name,
+             p.scientific_name as "scientificName",
+             p.category,
+             p.plant_type as "plantType",
+             p.measurement_type as "measurementType",
+             p.created_at as "createdAt",
+             p.updated_at as "updatedAt",
              COALESCE(
                json_agg(
                  json_build_object(
@@ -67,7 +81,7 @@ const db = {
       FROM plants p
       LEFT JOIN suppliers s ON p.id = s.plant_id
       WHERE p.id = $1
-      GROUP BY p.id
+      GROUP BY p.id, p.name, p.scientific_name, p.category, p.plant_type, p.measurement_type, p.created_at, p.updated_at
     `;
     const result = await pool.query(query, [id]);
     if (result.rows.length === 0) return null;
