@@ -11,11 +11,7 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:3000',
-    'https://plantpick-frontend.vercel.app',
-    'https://plantpick-frontend-git-main-nuttwarunyus-projects.vercel.app'
-  ],
+  origin: true, // Allow all origins for now
   credentials: true
 }));
 app.use(morgan('combined'));
