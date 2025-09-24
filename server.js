@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { v4: uuidv4 } = require('uuid');
+const { db } = require('./database');
 require('dotenv').config();
 
 const app = express();
@@ -18,49 +19,7 @@ app.use(morgan('combined'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// In-memory storage (ใน production ควรใช้ database)
-let plantsData = [
-  {
-    id: "plant_001",
-    name: "ต้นยางอินเดีย",
-    scientificName: "Ficus elastica",
-    category: "ไม้ประดับ",
-    plantType: "ไม้ประดับ",
-    measurementType: "ความสูง",
-    suppliers: [
-      {
-        id: "supplier_001",
-        name: "สวนไม้ประดับไทย",
-        price: 150,
-        phone: "081-234-5678",
-        location: "กรุงเทพฯ",
-        lastUpdated: "2024-01-15T10:30:00Z",
-        size: "30-40 ซม."
-      }
-    ],
-    hasSuppliers: true
-  },
-  {
-    id: "plant_002",
-    name: "ต้นมอนสเตอร่า",
-    scientificName: "Monstera deliciosa",
-    category: "ไม้ประดับ",
-    plantType: "ไม้ประดับ",
-    measurementType: "ความสูง",
-    suppliers: [
-      {
-        id: "supplier_002",
-        name: "ร้านต้นไม้สวยงาม",
-        price: 200,
-        phone: "082-345-6789",
-        location: "เชียงใหม่",
-        lastUpdated: "2024-01-14T15:20:00Z",
-        size: "40-50 ซม."
-      }
-    ],
-    hasSuppliers: true
-  }
-];
+// Database connection will be handled by database.js
 
 // Routes
 app.get('/api/health', (req, res) => {
@@ -72,14 +31,16 @@ app.get('/api/health', (req, res) => {
 });
 
 // Get all plants
-app.get('/api/plants', (req, res) => {
+app.get('/api/plants', async (req, res) => {
   try {
+    const plants = await db.getPlants();
     res.json({
       success: true,
-      data: plantsData,
+      data: plants,
       message: 'ดึงข้อมูลต้นไม้สำเร็จ'
     });
   } catch (error) {
+    console.error('Error fetching plants:', error);
     res.status(500).json({
       success: false,
       data: [],
@@ -89,9 +50,9 @@ app.get('/api/plants', (req, res) => {
 });
 
 // Get specific plant by ID
-app.get('/api/plants/:id', (req, res) => {
+app.get('/api/plants/:id', async (req, res) => {
   try {
-    const plant = plantsData.find(p => p.id === req.params.id);
+    const plant = await db.getPlantById(req.params.id);
     if (!plant) {
       return res.status(404).json({
         success: false,
@@ -106,6 +67,7 @@ app.get('/api/plants/:id', (req, res) => {
       message: 'ดึงข้อมูลต้นไม้สำเร็จ'
     });
   } catch (error) {
+    console.error('Error fetching plant:', error);
     res.status(500).json({
       success: false,
       data: null,
@@ -115,12 +77,13 @@ app.get('/api/plants/:id', (req, res) => {
 });
 
 // Add supplier to plant
-app.post('/api/plants/:plantId/suppliers', (req, res) => {
+app.post('/api/plants/:plantId/suppliers', async (req, res) => {
   try {
     const { plantId } = req.params;
     const { name, price, phone, location, size } = req.body;
     
-    const plant = plantsData.find(p => p.id === plantId);
+    // Check if plant exists
+    const plant = await db.getPlantById(plantId);
     if (!plant) {
       return res.status(404).json({
         success: false,
@@ -135,19 +98,18 @@ app.post('/api/plants/:plantId/suppliers', (req, res) => {
       price: Number(price),
       phone,
       location,
-      lastUpdated: new Date().toISOString(),
       size
     };
     
-    plant.suppliers.push(newSupplier);
-    plant.hasSuppliers = true;
+    const supplier = await db.addSupplier(plantId, newSupplier);
     
     res.json({
       success: true,
-      data: newSupplier,
+      data: supplier,
       message: 'เพิ่มข้อมูลผู้จัดจำหน่ายสำเร็จ'
     });
   } catch (error) {
+    console.error('Error adding supplier:', error);
     res.status(500).json({
       success: false,
       data: null,
@@ -157,21 +119,12 @@ app.post('/api/plants/:plantId/suppliers', (req, res) => {
 });
 
 // Update supplier price
-app.put('/api/plants/:plantId/suppliers/:supplierId/price', (req, res) => {
+app.put('/api/plants/:plantId/suppliers/:supplierId/price', async (req, res) => {
   try {
     const { plantId, supplierId } = req.params;
     const { price } = req.body;
     
-    const plant = plantsData.find(p => p.id === plantId);
-    if (!plant) {
-      return res.status(404).json({
-        success: false,
-        data: null,
-        message: 'ไม่พบข้อมูลต้นไม้'
-      });
-    }
-    
-    const supplier = plant.suppliers.find(s => s.id === supplierId);
+    const supplier = await db.updateSupplierPrice(plantId, supplierId, Number(price));
     if (!supplier) {
       return res.status(404).json({
         success: false,
@@ -180,15 +133,13 @@ app.put('/api/plants/:plantId/suppliers/:supplierId/price', (req, res) => {
       });
     }
     
-    supplier.price = Number(price);
-    supplier.lastUpdated = new Date().toISOString();
-    
     res.json({
       success: true,
       data: supplier,
       message: 'อัปเดตราคาสำเร็จ'
     });
   } catch (error) {
+    console.error('Error updating supplier price:', error);
     res.status(500).json({
       success: false,
       data: null,
@@ -198,21 +149,12 @@ app.put('/api/plants/:plantId/suppliers/:supplierId/price', (req, res) => {
 });
 
 // Delete supplier
-app.delete('/api/plants/:plantId/suppliers/:supplierId', (req, res) => {
+app.delete('/api/plants/:plantId/suppliers/:supplierId', async (req, res) => {
   try {
     const { plantId, supplierId } = req.params;
     
-    const plant = plantsData.find(p => p.id === plantId);
-    if (!plant) {
-      return res.status(404).json({
-        success: false,
-        data: null,
-        message: 'ไม่พบข้อมูลต้นไม้'
-      });
-    }
-    
-    const supplierIndex = plant.suppliers.findIndex(s => s.id === supplierId);
-    if (supplierIndex === -1) {
+    const supplier = await db.deleteSupplier(plantId, supplierId);
+    if (!supplier) {
       return res.status(404).json({
         success: false,
         data: null,
@@ -220,15 +162,13 @@ app.delete('/api/plants/:plantId/suppliers/:supplierId', (req, res) => {
       });
     }
     
-    const deletedSupplier = plant.suppliers.splice(supplierIndex, 1)[0];
-    plant.hasSuppliers = plant.suppliers.length > 0;
-    
     res.json({
       success: true,
-      data: deletedSupplier,
+      data: supplier,
       message: 'ลบข้อมูลผู้จัดจำหน่ายสำเร็จ'
     });
   } catch (error) {
+    console.error('Error deleting supplier:', error);
     res.status(500).json({
       success: false,
       data: null,
