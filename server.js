@@ -254,6 +254,68 @@ app.get('/api/locations', async (req, res) => {
   }
 });
 
+// Add new plant
+app.post('/api/plants', async (req, res) => {
+  try {
+    const { name, scientificName, category, plantType, measurementType, description } = req.body;
+    
+    const plantId = `plant_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const plant = await db.createPlant({
+      id: plantId,
+      name,
+      scientificName,
+      category,
+      plantType,
+      measurementType,
+      description
+    });
+    
+    res.json({
+      success: true,
+      data: plant,
+      message: 'เพิ่มข้อมูลต้นไม้สำเร็จ'
+    });
+  } catch (error) {
+    console.error('Error creating plant:', error);
+    res.status(500).json({
+      success: false,
+      data: null,
+      message: 'เกิดข้อผิดพลาดในการเพิ่มข้อมูลต้นไม้'
+    });
+  }
+});
+
+// Add supplier to plant
+app.post('/api/plants/:plantId/suppliers', async (req, res) => {
+  try {
+    const { plantId } = req.params;
+    const { name, price, phone, location, size } = req.body;
+    
+    const supplierId = `supplier_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const supplier = await db.addSupplier(plantId, {
+      id: supplierId,
+      name,
+      price: Number(price),
+      phone,
+      location,
+      size
+    });
+    
+    res.json({
+      success: true,
+      data: supplier,
+      message: 'เพิ่มข้อมูลผู้จัดจำหน่ายสำเร็จ'
+    });
+  } catch (error) {
+    console.error('Error adding supplier:', error);
+    res.status(500).json({
+      success: false,
+      data: null,
+      message: 'เกิดข้อผิดพลาดในการเพิ่มข้อมูลผู้จัดจำหน่าย'
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);

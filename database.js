@@ -197,6 +197,25 @@ const db = {
     const query = `SELECT * FROM locations ORDER BY name`;
     const result = await pool.query(query);
     return result.rows;
+  },
+
+  // Create new plant
+  async createPlant(plantData) {
+    const query = `
+      INSERT INTO plants (id, name, scientific_name, category, plant_type, measurement_type, description)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `;
+    const result = await pool.query(query, [
+      plantData.id,
+      plantData.name,
+      plantData.scientificName,
+      plantData.category,
+      plantData.plantType,
+      plantData.measurementType,
+      plantData.description
+    ]);
+    return result.rows[0];
   }
 };
 
