@@ -131,6 +131,72 @@ const db = {
     `;
     const result = await pool.query(query, [supplierId, plantId]);
     return result.rows[0];
+  },
+
+  // Orders
+  async createOrder(orderData) {
+    const query = `
+      INSERT INTO orders (id, order_number, total_amount, status)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `;
+    const result = await pool.query(query, [
+      orderData.id,
+      orderData.orderNumber,
+      orderData.totalAmount,
+      orderData.status || 'pending'
+    ]);
+    return result.rows[0];
+  },
+
+  async addOrderItem(orderId, itemData) {
+    const query = `
+      INSERT INTO order_items (id, order_id, plant_id, supplier_id, quantity, unit_price, total_price)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `;
+    const result = await pool.query(query, [
+      itemData.id,
+      orderId,
+      itemData.plantId,
+      itemData.supplierId,
+      itemData.quantity,
+      itemData.unitPrice,
+      itemData.totalPrice
+    ]);
+    return result.rows[0];
+  },
+
+  async getOrders() {
+    const query = `
+      SELECT o.*, 
+             COALESCE(
+               json_agg(
+                 json_build_object(
+                   'id', oi.id,
+                   'plantId', oi.plant_id,
+                   'supplierId', oi.supplier_id,
+                   'quantity', oi.quantity,
+                   'unitPrice', oi.unit_price,
+                   'totalPrice', oi.total_price
+                 )
+               ) FILTER (WHERE oi.id IS NOT NULL), 
+               '[]'
+             ) as items
+      FROM orders o
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      GROUP BY o.id
+      ORDER BY o.created_at DESC
+    `;
+    const result = await pool.query(query);
+    return result.rows;
+  },
+
+  // Locations
+  async getLocations() {
+    const query = `SELECT * FROM locations ORDER BY name`;
+    const result = await pool.query(query);
+    return result.rows;
   }
 };
 

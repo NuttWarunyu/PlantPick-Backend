@@ -177,6 +177,83 @@ app.delete('/api/plants/:plantId/suppliers/:supplierId', async (req, res) => {
   }
 });
 
+// Orders
+app.get('/api/orders', async (req, res) => {
+  try {
+    const orders = await db.getOrders();
+    res.json({
+      success: true,
+      data: orders,
+      message: 'ดึงข้อมูลคำสั่งซื้อสำเร็จ'
+    });
+  } catch (error) {
+    console.error('Error fetching orders:', error);
+    res.status(500).json({
+      success: false,
+      data: [],
+      message: 'เกิดข้อผิดพลาดในการดึงข้อมูลคำสั่งซื้อ'
+    });
+  }
+});
+
+app.post('/api/orders', async (req, res) => {
+  try {
+    const { orderNumber, totalAmount, items } = req.body;
+    
+    const orderId = `order_${Date.now()}`;
+    const order = await db.createOrder({
+      id: orderId,
+      orderNumber,
+      totalAmount,
+      status: 'pending'
+    });
+    
+    // Add order items
+    for (const item of items) {
+      await db.addOrderItem(orderId, {
+        id: `item_${Date.now()}_${Math.random()}`,
+        plantId: item.plantId,
+        supplierId: item.supplierId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: order,
+      message: 'สร้างคำสั่งซื้อสำเร็จ'
+    });
+  } catch (error) {
+    console.error('Error creating order:', error);
+    res.status(500).json({
+      success: false,
+      data: null,
+      message: 'เกิดข้อผิดพลาดในการสร้างคำสั่งซื้อ'
+    });
+  }
+});
+
+// Locations
+app.get('/api/locations', async (req, res) => {
+  try {
+    const locations = await db.getLocations();
+    res.json({
+      success: true,
+      data: locations,
+      message: 'ดึงข้อมูลที่ตั้งสำเร็จ'
+    });
+  } catch (error) {
+    console.error('Error fetching locations:', error);
+    res.status(500).json({
+      success: false,
+      data: [],
+      message: 'เกิดข้อผิดพลาดในการดึงข้อมูลที่ตั้ง'
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
