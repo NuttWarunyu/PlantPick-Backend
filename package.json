@@ -9,7 +9,8 @@
     "build": "echo 'No build step required'",
     "migrate": "node scripts/migrate.js",
     "migrate:run": "node scripts/run-migration.js",
-    "add-tables": "node scripts/add-tables.js"
+    "add-tables": "node scripts/add-tables.js",
+    "add-plants": "node scripts/add-plants.js"
   },
   "dependencies": {
     "express": "^4.18.2",
