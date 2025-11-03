@@ -6,6 +6,7 @@ const multer = require('multer');
 const csv = require('csv-parser');
 const { v4: uuidv4 } = require('uuid');
 const { db, pool } = require('./database');
+const aiService = require('./services/aiService');
 require('dotenv').config();
 
 const app = express();
@@ -43,13 +44,13 @@ app.get('/api/health', (req, res) => {
 // Add supplier endpoint
 app.post('/api/suppliers', async (req, res) => {
   try {
-    const { name, location, phone, email, website, description, specialties, businessHours, paymentMethods } = req.body;
+    const { name, location, phone, website, description, specialties, businessHours, paymentMethods } = req.body;
     
     const supplierId = `supplier_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     const query = `
-      INSERT INTO suppliers (id, name, location, phone, email, website, description, specialties, business_hours, payment_methods, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+      INSERT INTO suppliers (id, name, location, phone, website, description, specialties, business_hours, payment_methods, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
       RETURNING *
     `;
     
@@ -58,7 +59,6 @@ app.post('/api/suppliers', async (req, res) => {
       name,
       location,
       phone || null,
-      email || null,
       website || null,
       description || null,
       JSON.stringify(specialties),
@@ -175,7 +175,7 @@ app.get('/api/plant-suppliers', async (req, res) => {
 app.get('/api/suppliers', async (req, res) => {
   try {
     const query = `
-      SELECT id, name, location, phone, email, website, description, 
+      SELECT id, name, location, phone, website, description, 
              specialties, business_hours, payment_methods, created_at
       FROM suppliers
       ORDER BY created_at DESC
@@ -285,6 +285,46 @@ app.get('/api/statistics', async (req, res) => {
     res.status(500).json({
       success: false,
       data: null,
+      message: 'เกิดข้อผิดพลาดในการดึงข้อมูลสถิติ'
+    });
+  }
+});
+
+// 📊 Statistics Endpoint - ดึงข้อมูลสถิติ
+app.get('/statistics', async (req, res) => {
+  try {
+    const plants = await db.getPlants();
+    const suppliers = await db.getAllSuppliers();
+    
+    // นับจำนวนต้นไม้ตามหมวดหมู่
+    const categoryCount = {};
+    const plantTypeCount = {};
+    
+    plants.forEach(plant => {
+      categoryCount[plant.category] = (categoryCount[plant.category] || 0) + 1;
+      plantTypeCount[plant.plant_type] = (plantTypeCount[plant.plant_type] || 0) + 1;
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        totalPlants: plants.length,
+        totalSuppliers: suppliers.length,
+        categoryCount,
+        plantTypeCount
+      },
+      message: 'ดึงข้อมูลสถิติสำเร็จ'
+    });
+  } catch (error) {
+    console.error('Error fetching statistics:', error);
+    res.status(500).json({
+      success: false,
+      data: {
+        totalPlants: 0,
+        totalSuppliers: 0,
+        categoryCount: {},
+        plantTypeCount: {}
+      },
       message: 'เกิดข้อผิดพลาดในการดึงข้อมูลสถิติ'
     });
   }
@@ -433,6 +473,84 @@ app.delete('/api/plants/:plantId/suppliers/:supplierId', async (req, res) => {
       success: false,
       data: null,
       message: 'เกิดข้อผิดพลาดในการลบข้อมูลผู้จัดจำหน่าย'
+    });
+  }
+});
+
+// 🤖 AI Endpoints
+
+// AI Validation - ตรวจสอบข้อมูลด้วย AI
+app.post('/api/ai/validate', async (req, res) => {
+  try {
+    const { data, type } = req.body;
+    
+    const validation = await aiService.validateDataWithAI(data, type);
+    
+    res.json({
+      success: true,
+      data: validation,
+      message: 'ตรวจสอบข้อมูลสำเร็จ'
+    });
+  } catch (error) {
+    console.error('AI Validation Error:', error);
+    res.status(500).json({
+      success: false,
+      data: null,
+      message: 'เกิดข้อผิดพลาดในการตรวจสอบข้อมูล'
+    });
+  }
+});
+
+// AI Price Analysis - วิเคราะห์ราคาด้วย AI
+app.post('/api/ai/analyze-price', async (req, res) => {
+  try {
+    const { plantName, price, category, historicalPrices } = req.body;
+    
+    // ใช้ AI วิเคราะห์ราคา
+    const aiAnalysis = await aiService.analyzePrice(plantName, price, category);
+    
+    // ใช้ Smart Pricing
+    const optimalPrice = aiService.suggestOptimalPrice(plantName, category, price, historicalPrices || []);
+    
+    res.json({
+      success: true,
+      data: {
+        aiAnalysis,
+        optimalPrice,
+        timestamp: new Date().toISOString()
+      },
+      message: 'วิเคราะห์ราคาสำเร็จ'
+    });
+  } catch (error) {
+    console.error('AI Price Analysis Error:', error);
+    res.status(500).json({
+      success: false,
+      data: null,
+      message: 'เกิดข้อผิดพลาดในการวิเคราะห์ราคา'
+    });
+  }
+});
+
+// AI Business Insights - ดูข้อมูลเชิงลึก
+app.get('/api/ai/insights', async (req, res) => {
+  try {
+    const plants = await db.getPlants();
+    const suppliers = await db.getAllSuppliers();
+    const orders = await db.getOrders();
+    
+    const insights = aiService.generateInsights(plants, suppliers, orders);
+    
+    res.json({
+      success: true,
+      data: insights,
+      message: 'ดึงข้อมูลเชิงลึกสำเร็จ'
+    });
+  } catch (error) {
+    console.error('AI Insights Error:', error);
+    res.status(500).json({
+      success: false,
+      data: null,
+      message: 'เกิดข้อผิดพลาดในการดึงข้อมูลเชิงลึก'
     });
   }
 });
@@ -688,11 +806,52 @@ app.use('*', (req, res) => {
   });
 });
 
+// Initialize database tables
+async function initializeDatabase() {
+  try {
+    console.log('🔍 กำลังตรวจสอบและสร้างตาราง suppliers...');
+    
+    // สร้างตาราง suppliers ถ้ายังไม่มี
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS suppliers (
+        id VARCHAR(255) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        location TEXT NOT NULL,
+        phone VARCHAR(20),
+        website VARCHAR(255),
+        description TEXT,
+        specialties TEXT DEFAULT '[]',
+        business_hours VARCHAR(255),
+        payment_methods TEXT DEFAULT '[]',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    
+    // สร้าง index
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_suppliers_location ON suppliers(location)');
+    
+    console.log('✅ ตาราง suppliers พร้อมใช้งาน');
+    
+    // ตรวจสอบจำนวนข้อมูล
+    const countResult = await pool.query('SELECT COUNT(*) FROM suppliers');
+    console.log(`📊 จำนวนร้านค้าในฐานข้อมูล: ${countResult.rows[0].count} รายการ`);
+    
+  } catch (error) {
+    console.error('❌ เกิดข้อผิดพลาดในการสร้างตาราง:', error.message);
+    // ไม่ throw error เพราะอาจมีตารางอยู่แล้ว
+  }
+}
+
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🌱 Plant Price API Server running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
   console.log(`🌿 Plants API: http://localhost:${PORT}/api/plants`);
+  
+  // Initialize database tables
+  await initializeDatabase();
 });
 
 module.exports = app;
